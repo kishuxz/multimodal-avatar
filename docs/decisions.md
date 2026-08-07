@@ -161,3 +161,58 @@ repo's short history -- verify the resulting merge commit's raw
 `commit.author`/`commit.committer` immediately after every merge
 (`gh api repos/.../commits --jq '.[0].commit'`), not the GitHub-resolved
 `.author.login`, since that field is what actually lands in git history.
+
+## Pod environment (Phase 1, first hardware step)
+
+**Hardware:** RunPod, single H100 80GB HBM3. Driver `580.126.09`, host
+CUDA 13.0. Container image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`
+(ships torch 2.8.0+cu128 baseline). Network volume at `/workspace`.
+
+**Chose:** `HF_HOME=/workspace/hf`, set in `~/.bashrc` so it survives
+reconnects.
+**Why:** container disk resets on pod stop; the network volume at
+`/workspace` doesn't. Model weights are tens of GB -- re-downloading
+them every time the pod restarts would be slow and wasteful, and
+would silently change what's cached vs. what's cold on the next run.
+
+**Found:** `pip install vllm` replaced the base image's torch entirely --
+`torch 2.8.0+cu128` uninstalled, `torch 2.11.0+cu130` installed (pulled
+in by `vllm==0.26.0`'s dependency resolution), along with
+`torchvision 0.26.0` and `torchaudio 2.11.0`. `torch.version.cuda` moved
+from `12.8` to `13.0` -- which happens to now match the host driver's
+CUDA 13.0 more closely than the container's original build did.
+**Why it matters:** every result file's provenance has to record the
+*actual* installed torch/CUDA versions, not the container tag's implied
+ones -- the tag name (`torch280-cu1281`) describes the base image, not
+what's running once `pip install vllm` has had its way with it.
+**Accelerator kernels:** no `flash-attn` package by that name;
+`flashinfer-python 0.6.14` came along instead (vLLM's default attention
+kernel backend on this version). No `xformers`.
+
+Versions as installed:
+- vLLM: `0.26.0`
+- torch: `2.11.0+cu130`
+- torch.version.cuda: `13.0`
+
+**Chose:** connect over a direct TCP SSH endpoint (`root@<pod-ip>:<port>`,
+normal exec-mode SSH) rather than RunPod's `ssh.runpod.io` proxy.
+**Rejected:** the proxy as the primary connection.
+**Why:** the proxy only supports interactive PTY sessions, not exec
+mode -- every command has to go through a live shell via stdin, and the
+PTY's line-editing occasionally mangles piped-in commands (observed:
+a `kill -0 <pid>` liveness check silently corrupted, producing a false
+"process finished" reading on a `pip install` that was still running).
+Direct TCP gets a normal command channel: `ssh host 'cmd'` runs once and
+returns, no output-parsing games. The proxy stays configured as a
+fallback for when the pod's public IP isn't reachable.
+**How to apply:** the direct endpoint's IP and port are assigned per pod
+and change on every restart. Nothing in this repo hardcodes them --
+scripts take the endpoint as a parameter or read it from the shell
+environment at run time, never bake it into a committed file.
+
+**Changed from the original plan:** serving via `pip install vllm` on
+RunPod's own PyTorch base image, not the official vLLM OpenAI-compatible
+Docker image the kickoff spec called for.
+**Why:** not recorded yet -- this was a call made when setting up the
+pod, and the reasoning behind it isn't captured here. Flagging rather
+than inventing one.
