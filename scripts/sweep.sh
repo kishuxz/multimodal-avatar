@@ -53,11 +53,13 @@ wait_for_server_ready() {
 
 confirm_cache_cold() {
     # A freshly started process has no prior state by construction, but
-    # confirm rather than assume: gpu_cache_usage_perc should read ~0
-    # before any request has been served.
+    # confirm rather than assume: kv_cache_usage_perc should read ~0
+    # before any request has been served. (Verified against the running
+    # server's actual /metrics output, not the metric name guessed from
+    # memory -- vLLM 0.26.0 exposes this as vllm:kv_cache_usage_perc.)
     local usage
-    usage=$(curl -s "$METRICS_URL" | grep '^vllm:gpu_cache_usage_perc' | awk '{print $NF}')
-    log "gpu_cache_usage_perc after startup: ${usage:-unavailable}"
+    usage=$(curl -s "$METRICS_URL" | grep '^vllm:kv_cache_usage_perc' | awk '{print $NF}')
+    log "kv_cache_usage_perc after startup: ${usage:-unavailable}"
     if [ -n "$usage" ] && awk -v u="$usage" 'BEGIN{exit !(u > 0.01)}'; then
         echo "[sweep] cache usage is non-zero (${usage}) right after startup -- not cold, aborting" >&2
         exit 1
