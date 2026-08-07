@@ -48,7 +48,16 @@ RESULTS_DIR="results"
 
 mkdir -p "$RESULTS_DIR"
 
-log() { echo "[sweep] $*"; }
+# stderr, not stdout: several functions below (run_calibration,
+# derived_rate) return a value via `echo` for the caller to capture with
+# $(...), which grabs everything the function prints to stdout -- a log
+# line here would silently corrupt that capture. (Caught exactly this
+# way: log() on stdout mixed into calib_json, corrupting the path with
+# log text, which broke derived_rate()'s embedded Python with a
+# SyntaxError several steps later. The whole point of `tee`-ing this
+# script's own stdout+stderr together in the caller is that nothing is
+# lost by moving log() here.)
+log() { echo "[sweep] $*" >&2; }
 
 wait_for_server_ready() {
     local timeout_s="$1" waited=0
@@ -114,6 +123,10 @@ stop_server() {
 
 run_calibration() {
     # run_calibration <model> <arm_label>
+    # Only `echo "$out"` at the end may go to this function's stdout --
+    # the caller captures it with $(...). calibrate.py's own printed
+    # summary is useful but goes to stderr here so it can't contaminate
+    # that capture the same way log() almost did.
     local model="$1" arm_label="$2"
     local out="$RESULTS_DIR/calibration_${arm_label}.json"
     log "calibrating: $arm_label"
@@ -121,7 +134,7 @@ run_calibration() {
         --base-url "$BASE_URL" --model "$model" --label "$arm_label" \
         --duration "$CALIB_DURATION" \
         --target-concurrency "${TARGET_CONCURRENCIES[@]}" \
-        --out "$out"
+        --out "$out" >&2
     echo "$out"
 }
 
