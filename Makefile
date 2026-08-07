@@ -1,4 +1,4 @@
-.PHONY: setup provenance sweep analyze kv-check diffusion clean
+.PHONY: setup provenance sweep analyze kv-check perplexity diffusion clean
 
 setup:
 	pip install -r requirements.txt
@@ -23,6 +23,15 @@ analyze:
 # config, arithmetic only -- no server, no GPU. Added in Phase 5.
 kv-check:
 	python3 scripts/kv_cache_check.py
+
+# Phase 4: perplexity across 8 distinct wikitext-2 slices, fp16 + AWQ,
+# against a server this script starts itself. Requires a GPU pod, not
+# runnable from a laptop. The slices themselves (data/wikitext2_test_slices*)
+# are prepared separately, offline, by scripts/build_perplexity_slices.py --
+# not part of this target, since it needs pyarrow/transformers/
+# huggingface_hub locally and only ever needs to run once.
+perplexity:
+	scripts/perplexity_sweep.sh
 
 # Phase 3: per-frame diffusion timing breakdown. Added in Phase 3.
 diffusion:

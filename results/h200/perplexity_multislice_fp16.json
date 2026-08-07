@@ -1,0 +1,135 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T21:23:49.272438+00:00",
+    "git_sha": "0e1ff79e214bc4cdf4e4cf8b4063673d613cb593",
+    "git_dirty": false,
+    "git_sha_source": "env (shipped from transfer machine)",
+    "gpu": {
+      "name": "NVIDIA H200",
+      "driver_version": "570.124.06",
+      "driver_max_cuda_version": "12.8"
+    },
+    "vllm_version": "0.19.1",
+    "vllm_docker_image": null,
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--base-url",
+      "http://localhost:8000/v1",
+      "--model",
+      "Qwen/Qwen2.5-1.5B-Instruct",
+      "--label",
+      "fp16",
+      "--slices",
+      "data/wikitext2_test_slices.json",
+      "--out",
+      "results/h200/perplexity_multislice_fp16.json"
+    ],
+    "extra": {
+      "script": "perplexity_multislice.py",
+      "label": "fp16",
+      "slices_source_repo": "Salesforce/wikitext",
+      "slices_source_file": "wikitext-2-raw-v1/test-00000-of-00001.parquet",
+      "slices_source_file_sha256": "5f1bea067869d04849c0f975a2b29c4ff47d867f484f5010ea5e861eab246d91",
+      "slices_tokenizer": "Qwen/Qwen2.5-1.5B-Instruct",
+      "n_slices": 8,
+      "tokens_per_slice": 8192
+    }
+  },
+  "config": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "label": "fp16",
+    "slices": "data/wikitext2_test_slices.json",
+    "timeout": 120.0,
+    "out": "results/h200/perplexity_multislice_fp16.json"
+  },
+  "stats": {
+    "perplexity": {
+      "mean": 8.792054021341421,
+      "stdev": 1.5375465988493444,
+      "min": 5.966305374464882,
+      "max": 11.384107942597568
+    },
+    "nll": {
+      "mean": 2.159507030840554,
+      "stdev": 0.18494259834681964
+    },
+    "n_slices": 8
+  },
+  "per_slice": [
+    {
+      "n_scored_tokens": 8191,
+      "nll": 2.273342936103686,
+      "perplexity": 9.711812577559376,
+      "mean_rank": 58.14259553168112,
+      "latency_s": 0.3787977434694767,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 0
+    },
+    {
+      "n_scored_tokens": 8191,
+      "nll": 1.7861278705796053,
+      "perplexity": 5.966305374464882,
+      "mean_rank": 46.49700891222073,
+      "latency_s": 0.12847470492124557,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 1
+    },
+    {
+      "n_scored_tokens": 8191,
+      "nll": 2.168818821197153,
+      "perplexity": 8.747945048583851,
+      "mean_rank": 53.611280673910386,
+      "latency_s": 0.12691830471158028,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 2
+    },
+    {
+      "n_scored_tokens": 8191,
+      "nll": 2.170783154370476,
+      "perplexity": 8.765145815729035,
+      "mean_rank": 32.82480771578562,
+      "latency_s": 0.1245109885931015,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 3
+    },
+    {
+      "n_scored_tokens": 8191,
+      "nll": 2.1640273760045883,
+      "perplexity": 8.706130006575927,
+      "mean_rank": 61.22707850079355,
+      "latency_s": 0.12615137919783592,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 4
+    },
+    {
+      "n_scored_tokens": 8191,
+      "nll": 2.216911182821861,
+      "perplexity": 9.178934981563136,
+      "mean_rank": 47.58014894396289,
+      "latency_s": 0.12624704465270042,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 5
+    },
+    {
+      "n_scored_tokens": 8191,
+      "nll": 2.432218342699517,
+      "perplexity": 11.384107942597568,
+      "mean_rank": 72.90550604321817,
+      "latency_s": 0.1275026947259903,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 6
+    },
+    {
+      "n_scored_tokens": 8191,
+      "nll": 2.063826562947548,
+      "perplexity": 7.876050423657597,
+      "mean_rank": 58.22488096691491,
+      "latency_s": 0.1251821517944336,
+      "usage_prompt_tokens": 8192,
+      "slice_index": 7
+    }
+  ]
+}
