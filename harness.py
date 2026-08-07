@@ -311,6 +311,13 @@ def summarize(results: list[TurnResult], warmup: int, wall: float) -> dict:
     itls = [x for r in ok for x in r.itls]
     toks = sum(r.n_tokens for r in ok)
 
+    # e2e for completed (non-aborted) requests only -- an aborted request's
+    # e2e reflects when the abort fired, not how long the request actually
+    # took to serve, and this is the number Little's Law calibration reads
+    # as "service time." Mixing the two would make a calibration run's
+    # derived rate depend on its barge-in fraction, which it must not.
+    e2es = [r.e2e for r in ok if not r.aborted and r.e2e is not None]
+
     return {
         "requests_total": len(results),
         "requests_after_warmup": len(kept),
@@ -334,6 +341,11 @@ def summarize(results: list[TurnResult], warmup: int, wall: float) -> dict:
         },
         "itl_s": {
             "p50": pct(itls, 50), "p95": pct(itls, 95), "p99": pct(itls, 99),
+        },
+        "e2e_s": {
+            "p50": pct(e2es, 50), "p95": pct(e2es, 95),
+            "p99": pct(e2es, 99), "mean": statistics.fmean(e2es) if e2es else None,
+            "n": len(e2es),
         },
     }
 

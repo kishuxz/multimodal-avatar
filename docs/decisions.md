@@ -266,3 +266,119 @@ falsely precise point estimate.
 (e.g. a different `max_tokens`, a different quantization backend) gets
 re-verified with this script rather than assumed to inherit this
 result -- it measures the mechanism, not a universal constant.
+
+## Predictions, stated before measuring (Phase 3 sweep)
+
+Qwen2.5-1.5B: 28 layers, 12 query heads, 2 KV heads -- aggressive GQA
+(6:1), so the KV cache is roughly a sixth the size of full multi-head
+attention at the same context length. On an 80GB H100 with a 1.5B
+model, there is almost no memory pressure for quantization to relieve:
+weights are a few GB, KV cache has enormous headroom even unquantized.
+
+**Predicted:** small or negative latency deltas between arms at low
+concurrency. Any quantization benefit should appear only at high
+concurrency, where batch memory pressure (KV cache competing with
+weights for the 90% GPU-memory-utilization budget, more sequences
+resident at once) starts to matter.
+
+**Predicted, AWQ specifically:** may be *slower* than fp16 at low load.
+AWQ's int4 weights require a dequantization step per matmul; that's a
+fixed compute cost that only pays for itself when you were bandwidth-
+bound on weight loading in the first place. At low concurrency with
+this small a model, bandwidth was never the bottleneck -- so the dequant
+overhead is pure addition, not a trade.
+
+**Predicted, FP8 specifically:** same shape as AWQ's prediction (small/
+negative at low load, possible benefit only at high concurrency) --
+plus a scope note that matters for interpreting whatever the numbers
+say: vLLM's on-the-fly `fp8_per_tensor` is weight-only with a *static*
+scale computed from the weights themselves, not the calibrated W8A8
+(weights and activations both quantized, activation scales fit against
+a calibration dataset) that most published FP8 checkpoints use.
+Confirmed directly from vLLM 0.26.0's own engine startup log (not
+assumed): `quantization_config=QuantizationConfigArgs(linear=QuantSpec(
+weight=QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(static=True,
+...)), activation=None), moe=QuantSpec(..., activation=None))` --
+`activation=None` on both `linear` and `moe` means activations stay in
+bf16, only weights move to fp8. This arm tests a *different*
+intervention than a calibrated FP8 checkpoint would, and the README
+must say so wherever FP8 numbers appear -- these predictions, and any
+results, are about weight-only dynamic-scale FP8, not W8A8.
+
+**If the data contradicts any of this, that is the more useful result**
+-- it means either the memory-pressure model above is wrong for this
+model/hardware combination, or something about this specific serving
+setup (batching behavior, kernel selection, the `deep_gemm` import
+failure noted above) is doing something the simple story doesn't
+predict. Either way it gets written up, not smoothed over.
+
+## FP8 arm: which flag, and why (issue: don't assume the API)
+
+**Chose:** `--quantization fp8_per_tensor`.
+**Rejected:** a bare `--quantization fp8` (does not exist in vLLM
+0.26.0 -- `_ONLINE_SHORTHANDS` in `vllm/config/quantization.py` has no
+plain `"fp8"` key; this is a genuine API change from older vLLM
+versions where that flag existed, not a typo). Also rejected
+`fp8_per_channel` and `fp8_per_block`: viable alternatives (per-channel
+or per-block weight scale granularity instead of per-tensor), but
+`fp8_per_tensor` is the simplest, most-standard-sounding on-the-fly
+recipe and there's no reason in this project's goals to need finer
+scale granularity.
+**Why it matters:** the three online shorthands differ only in scale
+*granularity* (per-tensor / per-channel / per-block), not in whether
+activations are quantized -- source inspection alone left that
+genuinely ambiguous (a code comment on `fp8_per_channel` claims
+"dynamic per-token activation" while the `QuantSpec` it constructs only
+sets `weight`, not `activation`). Resolved by loading the model and
+reading vLLM's own engine-init log rather than trusting either the
+comment or the schema in isolation -- see the prediction entry above
+for the exact confirmed config.
+**How to apply:** if a future vLLM upgrade changes `_ONLINE_SHORTHANDS`
+or this repo ever wants a genuinely calibrated W8A8 FP8 arm (a
+pre-quantized checkpoint, not an on-the-fly flag), that's a different
+experiment and needs its own entry here, not a silent swap of what
+"the FP8 arm" means.
+
+## Holding concurrency constant, not arrival rate (Phase 3 sweep)
+
+**Chose:** derive each arm's arrival rate independently via Little's
+Law to target the same offered concurrency (~1 / 8 / 32) across fp16,
+AWQ, and FP8 -- not the same arrival rate.
+**Rejected:** holding arrival rate (requests/sec) constant across arms
+and letting realized concurrency vary by arm.
+**Why:** service time differs by arm (that's the whole point of
+testing quantization), so the two choices are different experiments.
+Holding arrival rate constant would mean a faster arm is automatically
+evaluated at *lower* concurrency than a slower one -- the axis this
+sweep is trying to measure an effect along would also be shifting
+underneath the comparison, conflating "this arm is faster" with "this
+arm was tested at an easier operating point." Holding concurrency
+constant instead means every arm is compared at the same point on the
+load curve, which is also the standard framing for reporting
+quantization results elsewhere (throughput/latency *at a given batch
+size or concurrency*) -- and it's what the predictions above are stated
+in terms of ("at high concurrency"), so it's the comparison that
+actually tests them.
+**How to apply:** "concurrency ~= 1/8/32" is the *offered* load implied
+by a low-load (unqueued) service-time measurement via Little's Law, not
+a guarantee of the realized average number of requests in flight --
+under real queueing near saturation, realized concurrency can run
+higher than the target once a server falls behind. The README names
+this as the design that ran; a different, arrival-rate-held-constant
+sweep would answer a different question and needs to be labeled as
+such if it's ever run.
+
+## --gpu-memory-utilization fixed at 0.9 across every arm
+
+**Chose:** every server start in `scripts/sweep.sh` passes
+`--gpu-memory-utilization 0.9`, unconditionally, regardless of arm.
+**Why:** this setting determines how much VRAM is left for the KV
+cache after weights and activation memory are reserved. Letting it
+vary per arm (e.g. raising it for a smaller-weight quantized arm to
+"use the freed memory") would mean any latency/throughput difference
+observed is partly attributable to a different KV cache budget, not
+just the quantization -- exactly the confound the Phase 1 harness
+critique flagged as a way to accidentally measure a setting instead of
+an intervention. `scripts/sweep.sh`'s `confirm_cache_cold` check also
+verifies the prefix cache is actually empty right after each restart,
+rather than assuming a fresh process implies a cold cache.
