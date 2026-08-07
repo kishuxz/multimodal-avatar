@@ -523,3 +523,17 @@ direction and rough magnitude are not in doubt.
 0-32 range), prefix caching off unless stated otherwise, vLLM 0.26.0.
 None of this generalizes to other model sizes, other hardware, or
 load levels between or beyond the two tested here without saying so.
+
+## First real dependency: matplotlib (Phase 5)
+
+**Chose:** add `matplotlib==3.11.1` to `requirements.txt` -- the first
+non-empty entry since Phase 0.
+**Why:** `scripts/analyze.py` and `scripts/kv_cache_check.py` produce
+plots, and there's no stdlib way to rasterize a chart. Every other
+Phase 5 computation (percentiles, mean/stdev, the matrix build) stays
+on `statistics` and `json`, same as every script before it -- this is
+the one place a third-party package earns its place, not a general
+loosening of the "small and boring" default from Phase 0.
+**How to apply:** the next dependency still needs its own sign-off and
+its own entry here, same as this one -- matplotlib landing doesn't
+make future additions the default.

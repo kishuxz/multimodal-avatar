@@ -1,2 +1,6 @@
 # Pinned per-phase, added only with explicit approval (see docs/decisions.md).
-# Empty for now: Phase 0 infra (bench/provenance.py) uses only the stdlib.
+# Phase 0 infra (bench/provenance.py) uses only the stdlib.
+
+# Phase 5: scripts/analyze.py and scripts/kv_cache_check.py plot to PNG.
+# No stdlib option for that; approved for this one purpose.
+matplotlib==3.11.1
