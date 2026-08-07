@@ -1,0 +1,114 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T08:28:50.675194+00:00",
+    "git_sha": "7908cfaf0da52265e95716e84427685502f98ee3",
+    "git_dirty": false,
+    "git_sha_source": "env (shipped from transfer machine)",
+    "gpu": {
+      "name": "NVIDIA H100 80GB HBM3",
+      "driver_version": "580.126.09",
+      "driver_max_cuda_version": "13.0"
+    },
+    "vllm_version": "0.26.0",
+    "vllm_docker_image": null,
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--base-url",
+      "http://localhost:8000/v1",
+      "--model",
+      "Qwen/Qwen2.5-1.5B-Instruct",
+      "--label",
+      "fp16_c32",
+      "--mode",
+      "open",
+      "--rate",
+      "498.6676",
+      "--duration",
+      "20",
+      "--warmup",
+      "10",
+      "--repeats",
+      "5",
+      "--seed-start",
+      "0",
+      "--out",
+      "results/repeat_fp16_c32.json"
+    ],
+    "extra": {
+      "script": "repeat_check.py",
+      "label": "fp16_c32"
+    }
+  },
+  "config": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "label": "fp16_c32",
+    "mode": "open",
+    "rate": 498.6676,
+    "concurrency": null,
+    "duration": 20.0,
+    "warmup": 10,
+    "repeats": 5,
+    "seed_start": 0,
+    "out": "results/repeat_fp16_c32.json"
+  },
+  "stats": {
+    "ttft_p50_s": {
+      "mean": 0.037311666272580625,
+      "stdev": 0.002429907953444227,
+      "min": 0.03481903672218323,
+      "max": 0.040666733868420124
+    },
+    "ttft_p99_s": {
+      "mean": 0.0885765814334154,
+      "stdev": 0.00730827191546319,
+      "min": 0.08247099187225107,
+      "max": 0.09988732667639846
+    },
+    "total_errors": 0
+  },
+  "per_repeat": [
+    {
+      "seed": 0,
+      "out": "results/repeat_fp16_c32_seed0.json",
+      "ttft_p50_s": 0.040666733868420124,
+      "ttft_p99_s": 0.09988732667639846,
+      "requests_ok": 7840,
+      "requests_error": 0
+    },
+    {
+      "seed": 1,
+      "out": "results/repeat_fp16_c32_seed1.json",
+      "ttft_p50_s": 0.0386772844940424,
+      "ttft_p99_s": 0.09171805111691354,
+      "requests_ok": 7902,
+      "requests_error": 0
+    },
+    {
+      "seed": 2,
+      "out": "results/repeat_fp16_c32_seed2.json",
+      "ttft_p50_s": 0.035248665139079094,
+      "ttft_p99_s": 0.08247099187225107,
+      "requests_ok": 7783,
+      "requests_error": 0
+    },
+    {
+      "seed": 3,
+      "out": "results/repeat_fp16_c32_seed3.json",
+      "ttft_p50_s": 0.037146611139178276,
+      "ttft_p99_s": 0.08576896682381631,
+      "requests_ok": 7913,
+      "requests_error": 0
+    },
+    {
+      "seed": 4,
+      "out": "results/repeat_fp16_c32_seed4.json",
+      "ttft_p50_s": 0.03481903672218323,
+      "ttft_p99_s": 0.08303757067769764,
+      "requests_ok": 7836,
+      "requests_error": 0
+    }
+  ]
+}
