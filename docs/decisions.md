@@ -1285,12 +1285,18 @@ runs `--repeats` (default 5, matching this repo's other noise-band
 passes) identical calls and reports mean/stdev across them -- if the
 stdev comes back exactly zero, that is itself a finding, not evidence
 the check was pointless.
-**How to apply:** any AWQ-vs-fp16 perplexity delta gets read against this
-run-to-run stdev before being called a real difference, same standard
-`docs/decisions.md`'s "Corrected results" entry above already established
-for the latency numbers -- a delta smaller than the noise band is "no
-measurable difference," not a quality win or loss, regardless of which
-direction it points.
+**How to apply, corrected after actually running it:** the stdev came
+back exactly zero (see "Phase 4 perplexity, single slice repeated,"
+below) -- a real methodology finding (this serving path is
+bit-reproducible under these conditions), but a band of zero supplies no
+error bar an AWQ-vs-fp16 delta can be checked against. Re-running one
+fixed slice more times was never going to produce one; a deterministic
+computation has no variance to average out. The actual noise band this
+repo's own standard (`docs/decisions.md`'s "Corrected results" entry --
+delta vs. run-to-run spread, before calling anything a real difference)
+requires came from a different axis instead: scoring several distinct
+text slices once each and taking the spread across *them*. See "Phase 4
+perplexity, cross-slice," below.
 **Limitation, stated plainly:** wikitext perplexity measures next-token
 prediction on encyclopedic prose. This project's actual workload
 (`harness.py`'s `USER_TURNS`) is short-form multi-turn conversational
@@ -1348,66 +1354,107 @@ issue #29's corrupted output means there is no coherent text to measure
 the perplexity of; a PPL number from it would describe confidence in
 token soup, not quality.
 
-## Phase 4 perplexity results: the noise band is zero, and AWQ's cost is real
+## Phase 4 perplexity, single slice repeated: a determinism check, not a noise band
 
 `results/h200/perplexity_fp16.json`, `results/h200/perplexity_awq.json` --
-5 repeats each, fresh server per arm, fixed 8192-token wikitext-2 slice,
-forced-decoding (`scripts/perplexity.py`).
+5 repeats each, fresh server per arm, one fixed 8192-token wikitext-2
+slice, forced-decoding (`scripts/perplexity.py`).
 
-**The noise band came back exactly zero.** Every one of the 5 repeats, for
-both arms, returned bit-identical NLL and perplexity (stdev 0.0 in both
-`stats.perplexity.stdev` and `stats.nll.stdev`). Not "small" -- exactly
-zero, to the full precision Python's float printed. This wasn't the
-expected outcome going in (see the measurement-design entry above: "an
-empirical question... not something to assume either way"), but it makes
-sense in hindsight -- a single unbatched sequence against an otherwise-idle
-server takes the same kernel path every time, with no other concurrent
-requests around to change batch composition and perturb reduction order the
-way continuous batching does under the load sweep. **This means: any
-nonzero fp16/AWQ delta here is definitionally real, not something that
-needs a stdev comparison to trust.** That's a stronger position than the
-latency numbers ever got to, and it's specific to this measurement's own
-conditions (single sequence, idle server) -- it does not imply the load
-sweep's latency noise bands should have been zero too; queueing, batching,
-and scheduling variance are real there in a way they aren't here.
+**Every one of the 5 repeats, for both arms, returned bit-identical NLL
+and perplexity (stdev 0.0).** That result is a property of the
+measurement, not a property worth calling a finding about the system on
+its own: forced-decoding a fixed slice against fixed weights involves no
+sampling anywhere -- same tokens in, same logits out, every time, by
+construction. Repeating an experiment that has no source of randomness
+can't produce variance; getting exactly zero back is confirmation the
+serving path is bit-reproducible under these specific conditions (one
+unbatched sequence, idle server, no concurrent requests perturbing kernel
+batching/reduction order), not evidence about the size of an effect.
+**This run supplies no noise band.** fp16: PPL 9.7118. AWQ: PPL 10.5145 --
+an 8.26% relative gap on this one slice, but "outside a noise band of
+zero" isn't a meaningful claim; a band of zero can't be beaten by
+anything. Kept as a methodology note (the serving path's own
+determinism, worth knowing on its own terms) and as the reason the actual
+uncertainty estimate had to come from somewhere else -- see below, not
+from repeating this measurement more.
 
-**fp16: PPL 9.7118 (NLL 2.2733, mean rank of the actual token 58.1).
-AWQ: PPL 10.5145 (NLL 2.3527, mean rank 62.3).** AWQ's perplexity is 8.26%
-higher (relative) than fp16's -- a real, not-noise difference, in the
-predicted direction.
+## Phase 4 perplexity, cross-slice: the real noise band, and the actual finding
+
+**At low load, AWQ is worse on both axes it will ever be judged on --
+slower (+14.5%, repeat-validated, `docs/decisions.md`/"H200 sweep
+results") and lower-quality (+8.02% perplexity, cross-slice, below).
+There is no concurrency in this sweep's tested range where AWQ is the
+right choice at c~=1.** That's the headline; the c~=32 trade below is the
+more interesting mechanism, but this is the more decision-relevant fact.
+
+**Method:** `scripts/build_perplexity_slices.py` cuts 8 non-overlapping
+8192-token slices from wikitext-2's test set (same tokenizer, same source
+file as the single-slice version -- different token ranges, not different
+sampling). `scripts/perplexity_multislice.py` forced-decodes each slice
+once per arm (no repeats -- the entry above already established that
+repeating one slice adds nothing) and reports mean/sd of perplexity
+*across slices*. That cross-slice spread is the uncertainty that actually
+applies to a claim like "AWQ costs 8% perplexity" -- how much the number
+moves when the underlying text changes, not whether re-running the exact
+same forward pass changes anything. `results/h200/
+perplexity_multislice_fp16.json`, `perplexity_multislice_awq.json`.
+
+**Per-slice results (PPL):**
+
+| Slice | fp16 | AWQ | AWQ relative to fp16 |
+|---|---|---|---|
+| 0 | 9.7118 | 10.5145 | +8.27% |
+| 1 | 5.9663 | 6.4418 | +7.97% |
+| 2 | 8.7479 | 9.4362 | +7.87% |
+| 3 | 8.7651 | 9.4873 | +8.24% |
+| 4 | 8.7061 | 9.3278 | +7.14% |
+| 5 | 9.1789 | 9.9239 | +8.12% |
+| 6 | 11.3841 | 12.2808 | +7.88% |
+| 7 | 7.8761 | 8.5625 | +8.71% |
+
+**Cross-slice: fp16 8.7921 +/- 1.5375, AWQ 9.4969 +/- 1.6565.** Raw
+perplexity itself swings hard across slices -- 5.97 to 11.38 for fp16,
+nearly a factor of 2 -- entirely from text difficulty (some wikitext
+articles are more predictable than others); this is expected and not
+itself a finding about either arm.
+
+**The gap holds consistently, not just on average -- this is the actual
+result, not the mean-of-means above.** AWQ is worse than fp16 on all 8 of
+8 slices, no exceptions, and the *relative* penalty is tight even where
+the raw numbers swing wide: 7.14% to 8.71%, mean 8.02%, sd 0.45 percentage
+points across slices. The per-slice relative comparison controls for
+each slice's own difficulty and isolates the quantization cost cleanly --
+which is why it's a better-supported number than either arm's raw
+cross-slice mean/sd above, and why "the claim is solid for the right
+reason" (the ~8% cost shows up regardless of what text it's measured on,
+not just on the one slice originally tried).
 
 **Against the pre-registered prediction:** predicted "a few percent,"
-landed at 8.26%. Direction right, order of magnitude right, but on the
-high side of "a few" -- not the "no measurable difference" surprise, not
-the "tens of percent, possibly broken" surprise either, so no
-sample-completions check was triggered the way it would have been at
-either extreme. Worth being precise rather than rounding this down to fit
-the prediction better after the fact: 8.26% is closer to "one-in-twelve
-tokens' worth of extra surprise" than to a marginal cost.
+landed at 8.02% (cross-slice mean of the per-slice relative deltas,
+superseding the single-slice 8.26% above as the number to actually cite).
+Direction right, order of magnitude right, on the high side of "a few" --
+same read as before, now on firmer footing.
 
 **Paired with the latency finding this was measured to complete
 (docs/decisions.md, "H200 sweep results," and the README's AWQ section):**
-AWQ trades an 8.26% real perplexity increase for a 21.6% TTFT p50 win at
-c~=32 (both repeat-validated, both real). At low load (c~=1), AWQ pays the
-same 8.26% perplexity cost *and* a 14.5% latency penalty -- worse on both
-axes, not a trade at all. The quality cost is the same at every load level
-(it's a property of the weights, not the batch), but whether it buys
-anything back in latency depends entirely on load. **The honest one-line
-version: AWQ is a bad idea at low load (slower and worse) and a real,
-quantifiable trade at high load (worse output, meaningfully faster) --
-never a free win at either end.**
+at c~=1, AWQ is worse on both axes -- 8.02% worse perplexity, 14.5% slower
+-- never the right choice at low load in this sweep's range. At c~=32,
+AWQ trades that same ~8% perplexity cost for a 21.6% TTFT p50 win -- a
+real, quantifiable trade, both sides repeat-validated. The quality cost
+doesn't change with load (it's a property of the weights, not the batch);
+whether it buys anything back in latency depends entirely on where you
+are on the load curve.
 
-**Limitation, repeated from the measurement-design entry because it
-matters most right here, at the point this number gets used to argue
-something:** this is wikitext-2 next-token perplexity, encyclopedic prose,
-not this project's actual multi-turn conversational workload. An 8.26%
-PPL increase says AWQ's weights carry real, measurable representational
-error relative to fp16 -- it does not say how a human rating this avatar's
-actual responses for coherence or helpfulness would perceive that error,
-which could be smaller (short conversational replies may not expose the
-kind of long-range prediction fp16 does better) or larger (a single bad
-word choice is more noticeable in a four-sentence reply than averaged into
-an 8192-token encyclopedia excerpt) than this number implies either way.
-Reported as what it is -- a real, repeatable signal that AWQ costs
-something on a standard proxy metric -- not as a validated statement about
-conversational quality.
+**Limitation, stated plainly:** this is wikitext-2 next-token perplexity,
+encyclopedic prose, not this project's actual multi-turn conversational
+workload. An 8.02% PPL increase says AWQ's weights carry real, measurable
+representational error relative to fp16 -- it does not say how a human
+rating this avatar's actual responses for coherence or helpfulness would
+perceive that error, which could be smaller (short conversational replies
+may not expose the kind of long-range prediction fp16 does better) or
+larger (a single bad word choice is more noticeable in a four-sentence
+reply than averaged into an 8192-token encyclopedia excerpt) than this
+number implies either way. Reported as what it is -- a real, repeatable
+signal that AWQ costs something on a standard proxy metric, now with an
+actual cross-sample error bar behind it -- not as a validated statement
+about conversational quality.

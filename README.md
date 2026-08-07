@@ -355,20 +355,34 @@ whatever ran on the H100 sweep, independent of any bandwidth argument.
 Neither has been checked with a profiler. The result itself -- direction
 and magnitude -- is not in question; the mechanism is open.
 
-**What that speed costs: AWQ's perplexity on a fixed wikitext-2 slice is
-8.26% higher than fp16's (10.5145 vs 9.7118, `results/h200/
-perplexity_awq.json` / `perplexity_fp16.json`) -- 5 repeats per arm, every
-repeat bit-identical (stdev 0.0), so this delta is not noise, full stop.**
-Paired with the table above: **at c~=32, AWQ trades that 8.26% quality
-cost for a 21.6% latency win -- a real trade, not a free one.** At c~=1,
-AWQ pays the same 8.26% quality cost *and* the 14.5% latency penalty --
-worse on both axes, never a good choice at low load. The quality cost
-itself doesn't vary with load (it's baked into the weights, not the
-batch); whether it buys anything back is entirely a function of where on
-the load curve you're operating. Full methodology, the pre-registered
-prediction, and why wikitext perplexity is a proxy for representational
-quality, not a validated measure of this project's actual multi-turn
-conversational output: `docs/decisions.md`, "Phase 4 perplexity results."
+**What that speed costs, and the most decision-relevant sentence in this
+section: at c~=1, AWQ is worse on both axes it will ever be judged on --
+8.02% worse perplexity and 14.5% slower. There is no load level tested
+here where AWQ is the right choice at low concurrency.**
+
+The 8.02% figure is a cross-slice mean, not a single measurement: 8
+distinct, non-overlapping wikitext-2 slices, one forced-decoding pass
+each, per arm (`results/h200/perplexity_multislice_awq.json` /
+`perplexity_multislice_fp16.json`). AWQ is worse than fp16 on all 8 of 8
+slices -- and the *relative* penalty is tight even where raw perplexity
+itself swings nearly 2x across slices from text difficulty alone (5.97 to
+11.38 for fp16): 7.14% to 8.71% per slice, mean 8.02%, sd 0.45 percentage
+points. That consistency, not just the average, is what makes this a real
+quantization cost rather than an artifact of which text happened to get
+measured.
+
+Paired with the table above, at c~=32 the story flips to an actual
+trade: **AWQ trades that same ~8% quality cost for a 21.6% latency win --
+real, repeat-validated on the latency side, cross-slice-validated on the
+quality side.** The quality cost itself doesn't vary with load (it's
+baked into the weights, not the batch); whether it buys anything back is
+entirely a function of where on the load curve you're operating. Full
+methodology (including why a single slice repeated can't supply a noise
+band -- forced-decoding a fixed input is deterministic by construction,
+confirmed, not just assumed), the pre-registered prediction, and why
+wikitext perplexity is a proxy for representational quality, not a
+validated measure of this project's actual multi-turn conversational
+output: `docs/decisions.md`, "Phase 4 perplexity, cross-slice."
 
 ### 3. FP8 excluded: corrupted output, not a quantization effect
 
@@ -481,9 +495,10 @@ disclosing that it happened is not.
   caching-*on* side (the *off* side is repeat-validated); repeat-
   validating the *on* side would close the same gap the H100 sweep's
   prefix-caching number still has.
-- Phase 4 done: perplexity, fp16 + AWQ, fixed wikitext-2 slice, noise
-  band came back exactly zero (see "H200 results" above and
-  `docs/decisions.md`). FP8 excluded, same reason as the latency sweep.
+- Phase 4 done: perplexity, fp16 + AWQ, cross-slice noise band (AWQ
+  worse on 8/8 wikitext-2 slices, ~8% consistently -- see "H200 results"
+  above and `docs/decisions.md`). FP8 excluded, same reason as the
+  latency sweep.
 - Phase 6 (GPU required): diffusion frame budget.
 - Phase 7: final README pass once Phase 6 lands.
 - Phase 8: go public, update resume.
