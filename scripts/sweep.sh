@@ -92,7 +92,14 @@ BARGE_IN_MAX_FRAC=0.75
 REPEAT_CONCURRENCIES=(1 32)
 REPEATS=5
 TMUX_SESSION="vllm-sweep"
-RESULTS_DIR="results"
+# results/h200, not results/ -- this run's filenames (fp16_pcoff_open_c1_
+# bargein0.0.json, calibration_fp16_pcoff.json, ...) are identical to the
+# H100 run's, which are already committed flat under results/. Writing
+# there would silently overwrite the H100 baseline this repo just spent
+# an entry (docs/decisions.md, "The H200 run is a fresh baseline") saying
+# never gets mixed or replaced. A subdirectory boundary makes that
+# structural, not a naming convention someone could get wrong.
+RESULTS_DIR="results/h200"
 
 mkdir -p "$RESULTS_DIR"
 
