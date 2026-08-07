@@ -1,4 +1,4 @@
-.PHONY: setup provenance sweep analyze diffusion clean
+.PHONY: setup provenance sweep analyze kv-check diffusion clean
 
 setup:
 	pip install -r requirements.txt
@@ -13,10 +13,16 @@ provenance:
 sweep:
 	scripts/sweep.sh
 
-# Phase 2: reads results/*.json, emits the markdown table and plots.
-# Added in Phase 2.
+# Phase 5: reads results/*.json, emits the markdown table and plots.
+# GPU-free -- runs against committed JSON only, no server. Added in Phase 5
+# (this comment previously said Phase 2, from before analyze.py existed).
 analyze:
 	python3 scripts/analyze.py
+
+# Phase 5: expected KV cache bytes/token and bytes/sequence from the model
+# config, arithmetic only -- no server, no GPU. Added in Phase 5.
+kv-check:
+	python3 scripts/kv_cache_check.py
 
 # Phase 3: per-frame diffusion timing breakdown. Added in Phase 3.
 diffusion:
