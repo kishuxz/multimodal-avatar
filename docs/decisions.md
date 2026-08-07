@@ -714,3 +714,72 @@ is what's reported here), the fix is deriving `--barge-in-min`/`--max`
 per arm from that arm's own service-time distribution, the same way
 `scripts/calibrate.py` already derives arrival rate per arm via Little's
 Law -- not attempted here, out of scope for this pass.
+
+## Sweep v2: four fixes folded into the design, not bolted on after
+
+Before any GPU time goes toward a re-run, `scripts/sweep.sh` and
+`scripts/analyze.py` get four changes -- each fixes something the H100
+sweep either got wrong or only fixed after the fact, and each is
+recorded here as a design change, not just a diff.
+
+**1. Scaled barge-in window, not a fixed 0.3-1.2s.**
+**Found:** in the H100 data, `aborted_total` is 0 for every concurrency
+1 and 8 `bargein0.25` run -- the fixed window never once fired before
+the request finished on its own at those load points. Only concurrency
+32 (where queueing pushed response time up near the fixed window)
+produced any aborts at all. The barge-in dimension of the entire H100
+sweep was effectively tested at one load point out of three.
+**Chose:** derive `--barge-in-min`/`--barge-in-max` per arm from that
+arm's own calibrated mean service time (`scripts/calibrate.py`'s
+concurrency=1 probe, already computed for the rate derivation) --
+25% to 75% of it, computed once per arm and applied at all three
+concurrencies. Early enough to reliably clear TTFT (a small fraction of
+total service time here), late enough to leave a real gap before
+natural completion.
+**Rejected:** recalibrating the window per load point (i.e. accounting
+for queueing-inflated response time at concurrency 32 specifically).
+**Why:** a single per-arm scale, from the same unqueued measurement
+`scripts/calibrate.py` already produces, is enough to fix the actual
+bug -- zero aborts at two of three load points -- without adding a
+second calibration pass. **Known limitation, stated rather than
+hidden:** at concurrency 32 the window is sized off unqueued service
+time, so it can land earlier in the request's actual (queued) lifetime
+than "mid-decode" -- it will still reliably fire and interrupt
+something in flight, just not necessarily at the same relative point in
+the response every time. See `scripts/sweep.sh`'s own comment for the
+exact fractions and reasoning.
+
+**2. Server startup log captured per run, committed.**
+**Found:** `scripts/sweep.sh` always `tee`'d each server's startup log
+to the pod's local disk and never copied it anywhere this repo tracks
+-- the KV-cache-size log line, resolved max model length, block size,
+and attention backend selection all existed only for the duration of
+that pod. This is what blocked `scripts/kv_cache_check.py` from having
+anything to verify against (see that entry above) and is issue #19.
+**Chose:** `start_server()` now copies the log to
+`results/server_log_${label}.txt` immediately after the server is
+confirmed ready and cold, before any load-test traffic -- a clean
+startup-only snapshot, committed alongside that arm's `results/*.json`.
+**Why now, not later:** confirmed directly (environment-rebuild PR) that
+vLLM 0.19.1 still prints `Available KV cache memory:` and
+`GPU KV cache size:` at startup, so this is a real capability, not a
+hope.
+
+**3. Repeats built into the matrix, not a separate manual pass.**
+**Found:** the H100 run's noise-band numbers (`scripts/repeat_check.py`,
+5 seeds at concurrency 1 and 32, prefix off, barge-in 0.0) came from a
+second, manual invocation after the main sweep had already run and been
+written up once with single-run numbers -- the original write-up
+initially called a 2.4% single-run AWQ/fp16 gap a "crossover" before
+the repeat pass showed it was noise (see "Corrected results" above).
+That mistake was possible specifically because repeats weren't part of
+the same pass that produced the single-run numbers in the first place.
+**Chose:** `run_open_loop_matrix()` now calls `scripts/repeat_check.py`
+directly, inline, for exactly the cells that were manually repeated
+before (concurrency 1 and 32, prefix off, barge-in 0.0) -- same scope,
+same script, just invoked automatically instead of as a follow-up step
+someone has to remember to run. Non-repeat cells (concurrency 8,
+barge-in 0.25, prefix-on) are unchanged, single-run.
+**Rejected:** repeating every cell. 5x the GPU time for load points the
+quantization comparison's noise band doesn't actually hinge on --
+scope stays what it was, just automatic now.
