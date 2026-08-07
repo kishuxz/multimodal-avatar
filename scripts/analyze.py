@@ -101,6 +101,25 @@ def load_json(path):
         return json.load(f)
 
 
+def env_tag(results_dir):
+    """GPU + vLLM version, read from any one result file's own provenance
+    block rather than hardcoded per script invocation -- so a plot's
+    environment label can't drift from what actually produced its data.
+    Every plot title gets this appended so a saved PNG identifies its own
+    environment even outside the README (H100 and H200 numbers must never
+    be presented as interchangeable -- see docs/decisions.md)."""
+    for path in sorted(glob.glob(os.path.join(results_dir, "*.json"))):
+        try:
+            prov = load_json(path).get("provenance", {})
+        except (json.JSONDecodeError, OSError):
+            continue
+        gpu = (prov.get("gpu") or {}).get("name")
+        vllm = prov.get("vllm_version")
+        if gpu and vllm:
+            return f"{gpu}, vLLM {vllm}"
+    return "environment unknown -- no provenance block found"
+
+
 # --------------------------------------------------------------------------
 # Discovery
 # --------------------------------------------------------------------------
@@ -397,7 +416,7 @@ def load_kept_requests(path):
     return d, [r for r in kept if r["error"] is None]
 
 
-def plot_ttft_vs_arrival_rate(cells, out_path):
+def plot_ttft_vs_arrival_rate(cells, out_path, env_label):
     # Only the highest-rate point is labeled: at the two low-rate points
     # all four series sit within ~2ms of each other, so per-point labels
     # there collide into an unreadable smear rather than adding
@@ -420,7 +439,7 @@ def plot_ttft_vs_arrival_rate(cells, out_path):
     ax.set_xscale("log")
     ax.set_xlabel("Offered arrival rate (req/s, log scale)")
     ax.set_ylabel("TTFT p50 (ms)")
-    ax.set_title("TTFT p50 vs arrival rate, open-loop, barge-in off\n"
+    ax.set_title(f"TTFT p50 vs arrival rate, open-loop, barge-in off -- {env_label}\n"
                   "(closed-loop cannot show this curve -- it self-throttles instead of queueing)")
     ax.legend()
     ax.grid(alpha=0.3)
@@ -429,7 +448,7 @@ def plot_ttft_vs_arrival_rate(cells, out_path):
     plt.close(fig)
 
 
-def plot_prefix_caching_effect(cells, out_path):
+def plot_prefix_caching_effect(cells, out_path, env_label):
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
     for ax, (label, key) in zip(axes, [("TTFT p50 (ms)", "ttft_p50_ms"), ("TTFT p99 (ms)", "ttft_p99_ms")]):
         off_vals, on_vals = [], []
@@ -452,14 +471,14 @@ def plot_prefix_caching_effect(cells, out_path):
         ax.set_title(label)
         ax.legend()
         ax.grid(alpha=0.3, axis="y")
-    fig.suptitle("Prefix caching on vs off, fp16 -- the largest lever in this sweep\n"
+    fig.suptitle(f"Prefix caching on vs off, fp16 -- the largest lever in this sweep -- {env_label}\n"
                   "(single runs, not yet repeat-validated -- see docs/decisions.md)")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_ttft_distribution_per_arm(results_dir, out_path):
+def plot_ttft_distribution_per_arm(results_dir, out_path, env_label):
     fig, axes = plt.subplots(1, 3, figsize=(14, 4.5), sharey=True)
     for ax, conc in zip(axes, CONC_ORDER):
         for arm, prefix in [("fp16", False), ("awq", False), ("fp8", False)]:
@@ -482,7 +501,7 @@ def plot_ttft_distribution_per_arm(results_dir, out_path):
         ax.legend(fontsize=8)
         ax.grid(alpha=0.3)
     axes[0].set_ylabel("density")
-    fig.suptitle("TTFT distribution per arm, prefix caching off, barge-in off\n"
+    fig.suptitle(f"TTFT distribution per arm, prefix caching off, barge-in off -- {env_label}\n"
                   "(c1/c32 pool all 5 repeat seeds; c8 has no repeats, single run)")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -529,7 +548,7 @@ def abort_window_itls(path, window_s=0.2):
     return with_abort, without_abort, stats
 
 
-def plot_itl_abort_windows(results_dir, out_path):
+def plot_itl_abort_windows(results_dir, out_path, env_label):
     # Barge-in only overlaps request lifetimes at concurrency ~= 32 in this
     # sweep -- at c1/c8 requests finish faster than the sampled abort delay
     # (0.3-1.2s, harness.py's --barge-in-min/--barge-in-max), so no abort
@@ -544,14 +563,22 @@ def plot_itl_abort_windows(results_dir, out_path):
     # against a with/without-abort split -- far more often. Abort *rate* is
     # shown per-arm below so this isn't mistaken for barge-in behaving
     # differently per arm; it's exposure, not mechanism.
-    arms = [("fp16", "fp16_pcoff_open_c32_bargein0.25.json"),
-            ("awq", "awq_open_c32_bargein0.25.json"),
-            ("fp8", "fp8_open_c32_bargein0.25.json")]
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4.5), sharey=True)
+    all_arms = [("fp16", "fp16_pcoff_open_c32_bargein0.25.json"),
+                ("awq", "awq_open_c32_bargein0.25.json"),
+                ("fp8", "fp8_open_c32_bargein0.25.json")]
+    # Only build a subplot for an arm that actually has a file -- e.g. FP8
+    # is excluded from the H200 sweep (issue #29). A subplot allocated for
+    # an arm with no data renders as an unlabeled empty box, which reads as
+    # a broken chart rather than "this arm wasn't run here."
+    arms = [(arm, fname) for arm, fname in all_arms
+            if os.path.exists(os.path.join(results_dir, fname))]
+    if not arms:
+        return
+    fig, axes = plt.subplots(1, len(arms), figsize=(5.5 * len(arms), 5), sharey=True)
+    if len(arms) == 1:
+        axes = [axes]
     for ax, (arm, fname) in zip(axes, arms):
         path = os.path.join(results_dir, fname)
-        if not os.path.exists(path):
-            continue
         with_abort, without_abort, stats = abort_window_itls(path)
         data = [without_abort, with_abort]
         ax.boxplot(data, tick_labels=[f"no abort\n(n={len(without_abort)})",
@@ -560,9 +587,19 @@ def plot_itl_abort_windows(results_dir, out_path):
         ax.set_title(f"{arm} (c≈32, {stats['n_windows']} windows, "
                       f"{stats['n_aborted']} aborts, {stats['abort_rate_pct']:.2f}% abort rate)",
                       fontsize=9)
+        # At a high enough abort rate, every 200ms window in the run can
+        # end up containing at least one abort somewhere -- e.g. H200 fp16
+        # here: 100/100 windows aborted, so the "no abort" control group is
+        # empty and this arm's with/without comparison isn't actually being
+        # made, just displayed as if it were. A separate, smaller text call
+        # (not appended to the title) so it doesn't fight the title for
+        # width on a narrow 2-panel figure.
+        if not without_abort and with_abort:
+            ax.text(0.5, 1.10, "no clean control window at this abort rate -- see docs/decisions.md",
+                     transform=ax.transAxes, ha="center", fontsize=7, color="firebrick")
         ax.grid(alpha=0.3, axis="y")
     axes[0].set_ylabel("ITL (ms), non-aborted requests only")
-    fig.suptitle("ITL of OTHER in-flight requests: windows with a barge-in abort vs without\n"
+    fig.suptitle(f"ITL of OTHER in-flight requests: windows with a barge-in abort vs without -- {env_label}\n"
                   "(200ms windows, concurrency ≈ 32, barge-in 0.25 -- the only combination\n"
                   "where aborts overlap request lifetimes. Abort rate tracks request duration,\n"
                   "not barge-in behaving differently by arm -- see docs/decisions.md)",
@@ -572,7 +609,7 @@ def plot_itl_abort_windows(results_dir, out_path):
     plt.close(fig)
 
 
-def plot_effect_size_comparison(cells, out_path):
+def plot_effect_size_comparison(cells, out_path, env_label):
     # The other plots each make one comparison in isolation (fp16 on vs
     # off; the arrival-rate curve). Neither puts prefix caching's effect
     # size in the same frame as quantization's, so "prefix caching is the
@@ -582,17 +619,24 @@ def plot_effect_size_comparison(cells, out_path):
     baseline = cells.get(("fp16", False, "open", 32, 0.0))
     if baseline is None:
         return  # nothing to compare against -- e.g. fp16 wasn't in this sweep
+    # (lever label, cell, validation status) -- status is reported per-lever
+    # in the subtitle below, built only from levers actually present in this
+    # sweep. A hardcoded "AWQ/FP8 repeat-validated" string previously stayed
+    # on the H200 version of this plot after FP8 was excluded (issue #29),
+    # naming a lever the chart no longer shows any data for.
     levers = [
-        ("prefix caching\n(fp16 on vs off)", cells.get(("fp16", True, "open", 32, 0.0))),
-        ("AWQ\n(vs fp16)", cells.get(("awq", False, "open", 32, 0.0))),
-        ("FP8\n(vs fp16)", cells.get(("fp8", False, "open", 32, 0.0))),
+        ("prefix caching\n(fp16 on vs off)", cells.get(("fp16", True, "open", 32, 0.0)),
+         "prefix caching single-run"),
+        ("AWQ\n(vs fp16)", cells.get(("awq", False, "open", 32, 0.0)), "AWQ repeat-validated"),
+        ("FP8\n(vs fp16)", cells.get(("fp8", False, "open", 32, 0.0)), "FP8 repeat-validated"),
     ]
     fig, ax = plt.subplots(figsize=(7, 5))
-    labels = [l for l, c in levers if c]
+    labels = [l for l, c, s in levers if c]
+    status_notes = [s for l, c, s in levers if c]
     p50_deltas = [(c["ttft_p50_ms"][0] - baseline["ttft_p50_ms"][0]) / baseline["ttft_p50_ms"][0] * 100
-                  for l, c in levers if c]
+                  for l, c, s in levers if c]
     p99_deltas = [(c["ttft_p99_ms"][0] - baseline["ttft_p99_ms"][0]) / baseline["ttft_p99_ms"][0] * 100
-                  for l, c in levers if c]
+                  for l, c, s in levers if c]
     x = range(len(labels))
     width = 0.35
     ax.bar([i - width / 2 for i in x], p50_deltas, width, label="TTFT p50")
@@ -606,8 +650,8 @@ def plot_effect_size_comparison(cells, out_path):
     ax.set_xticks(list(x))
     ax.set_xticklabels(labels)
     ax.set_ylabel("Change vs fp16, prefix caching off (%)")
-    ax.set_title("Effect size at concurrency ≈ 32: prefix caching vs quantization\n"
-                  "(prefix caching single-run; AWQ/FP8 repeat-validated)", fontsize=11)
+    ax.set_title(f"Effect size at concurrency ≈ 32: prefix caching vs quantization -- {env_label}\n"
+                  f"({'; '.join(status_notes)})", fontsize=11)
     ax.legend()
     ax.grid(alpha=0.3, axis="y")
     fig.tight_layout()
@@ -615,7 +659,7 @@ def plot_effect_size_comparison(cells, out_path):
     plt.close(fig)
 
 
-def plot_open_vs_closed(cells, out_path):
+def plot_open_vs_closed(cells, out_path, env_label):
     # Arms with no data (e.g. FP8 excluded from a sweep -- issue #29) are
     # skipped entirely, not plotted as a 0-height bar: a missing arm
     # rendered as ~0ms is indistinguishable from "measured and fast,"
@@ -645,7 +689,7 @@ def plot_open_vs_closed(cells, out_path):
         ax.set_title(label)
         ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
         ax.grid(alpha=0.3, axis="y")
-    fig.suptitle("Open-loop vs closed-loop at the same nominal concurrency (c≈8)\n"
+    fig.suptitle(f"Open-loop vs closed-loop at the same nominal concurrency (c≈8) -- {env_label}\n"
                   "closed-loop hides queueing by construction -- this is how much")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -673,13 +717,14 @@ def main():
           f"{len(explained)} intentionally excluded (calibration), 0 unaccounted")
 
     cells = build_cells(cfg.results_dir)
+    label = env_tag(cfg.results_dir)
 
-    plot_ttft_vs_arrival_rate(cells, os.path.join(cfg.plots_dir, "ttft_vs_arrival_rate.png"))
-    plot_prefix_caching_effect(cells, os.path.join(cfg.plots_dir, "prefix_caching_effect.png"))
-    plot_effect_size_comparison(cells, os.path.join(cfg.plots_dir, "effect_size_comparison.png"))
-    plot_ttft_distribution_per_arm(cfg.results_dir, os.path.join(cfg.plots_dir, "ttft_distribution_per_arm.png"))
-    plot_itl_abort_windows(cfg.results_dir, os.path.join(cfg.plots_dir, "itl_abort_windows.png"))
-    plot_open_vs_closed(cells, os.path.join(cfg.plots_dir, "open_vs_closed_loop.png"))
+    plot_ttft_vs_arrival_rate(cells, os.path.join(cfg.plots_dir, "ttft_vs_arrival_rate.png"), label)
+    plot_prefix_caching_effect(cells, os.path.join(cfg.plots_dir, "prefix_caching_effect.png"), label)
+    plot_effect_size_comparison(cells, os.path.join(cfg.plots_dir, "effect_size_comparison.png"), label)
+    plot_ttft_distribution_per_arm(cfg.results_dir, os.path.join(cfg.plots_dir, "ttft_distribution_per_arm.png"), label)
+    plot_itl_abort_windows(cfg.results_dir, os.path.join(cfg.plots_dir, "itl_abort_windows.png"), label)
+    plot_open_vs_closed(cells, os.path.join(cfg.plots_dir, "open_vs_closed_loop.png"), label)
 
     md = f"""# Results summary
 
