@@ -408,3 +408,28 @@ gets compared against AWQ or FP8.
 **How to apply:** any future arm added to this sweep runs with prefix
 caching off by default, matching the baseline, unless prefix caching
 itself is the thing being studied for that arm.
+
+## Load-run duration: 20s, validated, not assumed
+
+**Chose:** 20s per load run (was 120s in the original design), applied
+uniformly across every load point in the sweep.
+**Why:** at the concurrency~=32 rate (~500 req/s for this model),
+120s is 60,000+ requests -- dominates GPU spend for a percentile
+estimate that doesn't need that many samples. Checked rather than
+guessed: ran the same config (fp16, prefix off, rate=513 req/s) at
+20s and 60s. TTFT p99: 106.9ms (n=7970) vs 99.5ms (n=23831) -- about
+7% apart, judged stable enough to use the shorter duration.
+**Known tradeoff, disclosed rather than hidden:** applying 20s
+*uniformly* means the low end of the matrix (concurrency~=1, roughly
+16 req/s) gets only ~300 samples in a 20s window, versus ~1900 at the
+original 120s. p50/p95 are still reasonably estimated at that sample
+size; p99 there is noisier than at the high-concurrency points, where
+the high arrival rate itself supplies plenty of samples regardless of
+duration. This is a deliberate choice to control GPU cost, not an
+oversight -- if the low-concurrency p99 turns out to matter for a
+specific finding, that arm/load point can be re-run at longer duration
+individually rather than paying the cost everywhere.
+**How to apply:** `CALIB_DURATION` (30s) is unchanged -- calibration
+runs closed-loop at concurrency=1, which is inherently low-volume
+(~500 requests in 30s) regardless of the eventual load rate, so it was
+never the cost driver this check was about.

@@ -30,8 +30,16 @@ cd "$REPO_ROOT"
 BASE_URL="http://localhost:8000/v1"
 METRICS_URL="http://localhost:8000/metrics"
 GPU_MEM_UTIL=0.9
+# 20s, not the original 120s: validated via a duration-stability check
+# at the concurrency=32 rate (the expensive one -- ~500 req/s means a
+# 120s run is 60,000+ requests) -- 20s vs 60s gave TTFT p99 106.9ms vs
+# 99.5ms (n=7970 vs n=23831), ~7% apart, judged stable enough. Applied
+# uniformly, which is a real tradeoff at the low end: concurrency~=1
+# (~16 req/s) gets ~300 samples in 20s versus ~1900 at 120s -- p50 is
+# still fine there, p99 is noisier than the high-concurrency points'.
+# See docs/decisions.md.
 CALIB_DURATION=30
-LOAD_DURATION=120
+LOAD_DURATION=20
 CLOSED_LOOP_CONCURRENCY=8
 BARGE_IN_FRACTIONS=(0.0 0.25)
 TARGET_CONCURRENCIES=(1 8 32)
