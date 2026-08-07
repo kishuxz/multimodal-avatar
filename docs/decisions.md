@@ -59,3 +59,28 @@ purely as a backup.
 **How to apply:** history hygiene is a first-commit decision, not a
 cleanup pass. Every commit from here on is written as if the repo could
 go public tomorrow.
+
+## Pre-push attribution guard
+
+**Chose:** a local `pre-push` hook that rejects any push whose commit
+messages (subject + body, across the whole range being pushed) match
+`claude|anthropic|co-authored-by: claude|generated with|🤖`,
+case-insensitive.
+**Rejected:** relying on remembering to run the manual `git log | grep`
+check before every push.
+**Why:** the manual check already got skipped once — a PR merged with an
+AI co-author trailer before this repo was recreated, which is the reason
+it needed recreating at all. A hook that runs automatically doesn't
+depend on remembering.
+**How to apply:** hooks live under `.git/hooks` and are not versioned by
+git, so this file (or a copy of it) does not travel with a fresh clone —
+it has to be installed by hand. In a normal (non-worktree) clone, drop
+the script at `.git/hooks/pre-push` and `chmod +x` it. In a repo checked
+out via `git worktree`, hooks are shared across every worktree of that
+repo by default (they live in the common `.git` directory, not per
+worktree), so installing it once covers all worktrees — confirm with
+`git rev-parse --git-path hooks` from each worktree if in doubt.
+Verified by attempting a push with a deliberately bad commit message on
+a throwaway branch: rejected, nothing reached the remote. A follow-up
+push with a clean message on the same branch succeeded, confirming the
+hook isn't over-matching.
