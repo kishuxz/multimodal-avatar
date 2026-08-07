@@ -944,6 +944,98 @@ went wrong and got hidden. The old results are not a mistake to erase;
 they're the H100 baseline, still true for the hardware that produced
 them.
 
+## FP8's ~4x token-length gap is not a quantization effect -- it's a bug
+
+The H200 calibration checkpoint (`results/h200/calibration_fp8*.json`)
+showed FP8 averaging ~78 tokens/response against fp16's ~20-24 -- large
+enough, and the two distributions separated cleanly enough (FP8: 74-80
+tokens, 98%+ within 2 of the `max_tokens=80` cap; fp16: 10-80 tokens,
+median 20, 0.2% at cap), that treating it as "W8A8 costs more compute
+per token" without checking further would have been asserting a story
+the aggregate timing couldn't actually distinguish from a bug. Checked
+directly, four ways, before writing anything into a table:
+
+**1. `finish_reason`.** Not previously captured (issue #8, now fixed --
+see that PR). Fixed, then measured directly against a live server, both
+arms, same fixed prompt/turn set, no aggregation: **fp16: 221 `stop` /
+1 `length` (99.5% natural EOS). FP8: 0 `stop` / 76 `length` (100% hitting
+the cap, zero natural stops in the sample).** Not a skew, not a
+tendency -- FP8 never once reached EOS on its own.
+
+**2. Chat template.** Both arms load the identical model repo
+(`Qwen/Qwen2.5-1.5B-Instruct`; FP8 quantizes it on the fly, doesn't
+swap the checkpoint), so the tokenizer and template are the same files
+by construction -- confirmed rather than assumed: both startup logs
+show the identical line, `Detected the chat template content format to
+be 'string'`. No divergence to find.
+
+**3. EOS / sampling config resolution.** Both startup logs show the
+identical `generation_config.json` override
+(`{'repetition_penalty': 1.1, 'temperature': 0.7, 'top_k': 20, 'top_p':
+0.8}`), same warning, same values, same source file (same model repo).
+Nothing arm-specific in how stop conditions get resolved.
+
+**4. Output text.** Sent the same system prompt + user turn to both
+arms directly (`/v1/chat/completions`, non-streaming, so the full text
+is visible at once), repeated across two different prompts and two
+seeds. fp16, `seed=0`: *"It's okay to spend time on thoughts that
+matter to you. What is the thought or idea you've been pondering?
+Sometimes talking through what's on your mind can help clear things
+up."* -- coherent, on-topic, `finish_reason: stop`, 40 tokens. FP8, same
+prompt, `seed=0`, `finish_reason: length`, 80 tokens: *"袅 解.Resolve";}
+yabǃ qualidade感じるolving (...ñas andaLab yab standardized zwe...` --
+mixed-script token soup, not language. A second prompt at `max_tokens=8`
+(`seed=1`) confirms this isn't a late-sequence drift: *" Peripheral
+resolveolving";} yab感じる獬 qualidade"* -- garbled from the first
+token.
+
+**Conclusion: none of the four are ambiguous, and none point at
+configuration.** Chat template and EOS/sampling resolution are
+confirmed byte-identical between arms -- ruled out. `finish_reason` and
+the raw text together rule out "real quantization effect" too: genuine
+W8A8 quantization noise degrades coherence at the margins, it doesn't
+produce multi-script token soup from the first generated token with
+100% cap-hitting across every sample. **This is vLLM 0.19.1's online
+FP8 (`Fp8OnlineLinearMethod`, W8A8 dynamic activation scaling --
+see "FP8 on vLLM 0.19.1" above) producing corrupted output, not a
+subtle latency or quality cost of quantization.**
+**Candidate mechanism, a hypothesis, not confirmed by profiling:** the
+H100 arm's online FP8 (`fp8_per_tensor`, weight-only, static scale) was
+also computed on the fly from an unquantized checkpoint and produced
+normal output -- so "online quantization is inherently unreliable"
+doesn't fit; the H100 case rules that out. The variable that's actually
+new here is *dynamic activation* quantization -- computing an
+activation scale fresh every forward pass, not just quantizing weights
+once at load time. That's the most likely place a real bug lives,
+but confirming it would need kernel-level inspection, out of scope here.
+**What this means for the sweep:** the FP8 arm, as configured
+(`--quantization fp8` on vLLM 0.19.1), does not produce usable output.
+Any latency number from it describes how fast this server generates
+corrupted text, not a valid FP8 comparison point -- weight-only vs W8A8
+was never going to be comparable to the H100 arm (see "FP8 on vLLM
+0.19.1"), but this is a different, more basic problem: **the current
+FP8 configuration is broken, not just differently-scoped.** Recommend
+excluding it from the H200 sweep matrix rather than measuring it,
+pending either an upstream vLLM fix/version bump or finding a working
+FP8 configuration on this environment -- neither attempted here.
+**Also found, stated plainly since it affects every number already
+committed under `results/h200/calibration_fp8*.json`:** FP8's derived
+rates (5.4647 / 43.7178 / 174.8711 req/s) came from Little's Law reading
+the corrupted-output service time (183ms mean, vs fp16's 67ms) as if it
+were a real measurement. **Those rates are not valid and must not be
+used to drive a load-test run, or presented as FP8's arrival rate at
+equivalent concurrency to the other arms.** The calibration files stay
+committed (the measurement itself -- what the server actually did under
+that config -- is accurately recorded; the *interpretation* of it as
+"FP8's service time" is what's wrong), with this entry as the reason not
+to build anything on them as-is.
+**How to apply:** if a working FP8 configuration is found later on this
+environment, it needs its own calibration pass and its own
+`finish_reason` check before being trusted -- this entry's fix
+(capturing `finish_reason`) stays in the harness permanently specifically
+so this class of problem surfaces on the first calibration checkpoint
+next time, not after a full sweep's worth of GPU time.
+
 ## Sweep v2: four fixes folded into the design, not bolted on after
 
 Before any GPU time goes toward a re-run, `scripts/sweep.sh` and

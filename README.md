@@ -122,6 +122,21 @@ re-run, whose own results aren't in this README yet.
   look like.
 - AWQ auto-selects `awq_marlin` -> `MacheteLinearKernel` here (recorded
   now; no H100-side capture exists yet to compare against).
+- **FP8 is currently broken on this environment, not just a different
+  recipe -- excluded from the sweep pending a fix.** The calibration
+  checkpoint showed FP8 responses averaging ~4x more tokens than
+  fp16's; checked four ways (`finish_reason`, chat template, EOS/
+  sampling config, raw output text) before concluding anything, per
+  `docs/decisions.md`, "FP8's ~4x token-length gap is not a
+  quantization effect -- it's a bug." Confirmed: FP8 never reaches EOS
+  (0 `stop` / 76 `length` in a live sample; fp16: 221 `stop` / 1
+  `length`) because it's generating corrupted, mixed-script token soup
+  from the first token, not degraded-but-coherent text -- ruled out
+  chat-template and EOS-config differences directly (both confirmed
+  identical to fp16's). **FP8's calibration-derived rates
+  (5.46 / 43.72 / 174.87 req/s) are not valid** -- they're Little's Law
+  reading a corrupted-output service time as if it were real. Not used
+  for anything, not comparable to the other arms' rates.
 - Workload, load design, and sweep orchestration: same `harness.py` /
   `scripts/calibrate.py` / `scripts/sweep.sh` design as the H100 run,
   with four methodology improvements folded in before this run rather
@@ -244,12 +259,17 @@ with/without comparison the plot makes is unaffected; see
 
 ## What's next
 
-- Immediate: environment confirmed (see the H200 Setup block above) --
-  next is a calibration-only checkpoint (per-arm derived rates, reported
-  before any load-test traffic runs), then the full sweep with the four
-  v2 improvements (scaled barge-in window, server startup logs captured
-  per run, repeats built into the matrix, stricter file-classification
-  in `scripts/analyze.py`).
+- **Blocked: the H200 FP8 arm is broken** (see the H200 Setup block
+  above), not just differently-scoped from the H100's. The full sweep
+  matrix doesn't run until this resolves -- either a working FP8
+  configuration is found on this environment, or the matrix runs
+  fp16/AWQ only with FP8 explicitly marked unmeasured, not silently
+  dropped.
+- Environment otherwise confirmed and the calibration checkpoint (fp16
+  x2, AWQ) is valid; the four sweep-v2 improvements (scaled barge-in
+  window, server startup logs captured per run, repeats built into the
+  matrix, stricter file-classification in `scripts/analyze.py`) are
+  ready to go once the FP8 question resolves.
 - Phase 4 (GPU required): perplexity across arms, with its own noise
   band; repeat-validate the prefix-caching number the same way
   quantization was.
