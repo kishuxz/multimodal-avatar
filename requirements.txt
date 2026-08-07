@@ -1,0 +1,2 @@
+# Pinned per-phase, added only with explicit approval (see docs/decisions.md).
+# Empty for now: Phase 0 infra (bench/provenance.py) uses only the stdlib.
