@@ -42,3 +42,20 @@ sign-off before it's added.
 **Why:** small and boring is a stated constraint. `bench/provenance.py`
 needed zero third-party packages (subprocess + urllib cover it), so
 nothing was added in Phase 0.
+
+## Repo history (recreated from a single commit)
+
+**Chose:** squash the entire Phase 0 history into one commit and start
+this repo fresh from it, rather than keep the original multi-commit
+history.
+**Rejected:** rewriting the old repo's `main` branch in place.
+**Why:** a squash-merged PR leaves its pre-squash commits reachable
+through GitHub's own PR ref, independent of what's on `main` — rewriting
+`main` alone doesn't remove them, and they'd surface the moment this repo
+is ever made public. Recreating from one clean commit removes the
+question entirely instead of relying on `main` staying tidy while earlier
+history isn't. The original repo still exists, renamed and kept private,
+purely as a backup.
+**How to apply:** history hygiene is a first-commit decision, not a
+cleanup pass. Every commit from here on is written as if the repo could
+go public tomorrow.
