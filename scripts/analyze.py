@@ -56,6 +56,10 @@ REPEAT_SEED_RE = re.compile(
 )
 REPEAT_SUMMARY_RE = re.compile(r"^repeat_(?P<arm>fp16|awq|fp8)_c(?P<conc>\d+)\.json$")
 CALIBRATION_RE = re.compile(r"^calibration_[A-Za-z0-9_]+\.json$")
+# Phase 4 (perplexity) results: not a load-sweep cell, not built or plotted
+# by this script -- see scripts/perplexity.py / perplexity_multislice.py
+# and the README's Findings section for those numbers.
+PERPLEXITY_RE = re.compile(r"^perplexity_[A-Za-z0-9_]+\.json$")
 
 # filename arm token -> (canonical arm, prefix caching on/off). AWQ and FP8
 # only ever run with prefix caching off (docs/decisions.md: "prefix caching
@@ -160,6 +164,10 @@ def discover_repeat_summaries(results_dir):
 INTENTIONALLY_UNCLASSIFIED_PATTERNS = [
     (CALIBRATION_RE, "calibration measurement / probe dump -- backs a "
                       "derived rate or service time, not itself a cell"),
+    (PERPLEXITY_RE, "Phase 4 perplexity result -- a different measurement "
+                     "(forced-decoding on a wikitext slice, not a load-sweep "
+                     "cell), read directly, not built into this script's "
+                     "tables or plots"),
 ]
 
 
