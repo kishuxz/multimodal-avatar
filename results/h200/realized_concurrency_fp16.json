@@ -1,0 +1,39 @@
+{
+  "label": "fp16",
+  "n_files": 5,
+  "mean_realized_concurrency": 76.47006706586826,
+  "mean_realized_concurrency_stdev": 6.673508287994256,
+  "max_realized_concurrency_across_files": 156,
+  "per_file": [
+    {
+      "mean": 87.73652694610779,
+      "max": 156,
+      "n_samples": 501,
+      "file": "results/h200/repeat_fp16_c32_seed0.json"
+    },
+    {
+      "mean": 76.518,
+      "max": 139,
+      "n_samples": 500,
+      "file": "results/h200/repeat_fp16_c32_seed1.json"
+    },
+    {
+      "mean": 74.67664670658682,
+      "max": 133,
+      "n_samples": 501,
+      "file": "results/h200/repeat_fp16_c32_seed2.json"
+    },
+    {
+      "mean": 72.86427145708583,
+      "max": 117,
+      "n_samples": 501,
+      "file": "results/h200/repeat_fp16_c32_seed3.json"
+    },
+    {
+      "mean": 70.55489021956087,
+      "max": 111,
+      "n_samples": 501,
+      "file": "results/h200/repeat_fp16_c32_seed4.json"
+    }
+  ]
+}

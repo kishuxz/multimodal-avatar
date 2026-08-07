@@ -1,0 +1,39 @@
+{
+  "label": "awq",
+  "n_files": 5,
+  "mean_realized_concurrency": 63.92353453093813,
+  "mean_realized_concurrency_stdev": 1.121135578653167,
+  "max_realized_concurrency_across_files": 107,
+  "per_file": [
+    {
+      "mean": 64.626,
+      "max": 102,
+      "n_samples": 500,
+      "file": "results/h200/repeat_awq_c32_seed0.json"
+    },
+    {
+      "mean": 64.78243512974052,
+      "max": 107,
+      "n_samples": 501,
+      "file": "results/h200/repeat_awq_c32_seed1.json"
+    },
+    {
+      "mean": 62.034,
+      "max": 91,
+      "n_samples": 500,
+      "file": "results/h200/repeat_awq_c32_seed2.json"
+    },
+    {
+      "mean": 64.3812375249501,
+      "max": 90,
+      "n_samples": 501,
+      "file": "results/h200/repeat_awq_c32_seed3.json"
+    },
+    {
+      "mean": 63.794,
+      "max": 97,
+      "n_samples": 500,
+      "file": "results/h200/repeat_awq_c32_seed4.json"
+    }
+  ]
+}
