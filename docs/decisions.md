@@ -783,3 +783,24 @@ barge-in 0.25, prefix-on) are unchanged, single-run.
 **Rejected:** repeating every cell. 5x the GPU time for load points the
 quantization comparison's noise band doesn't actually hinge on --
 scope stays what it was, just automatic now.
+**4. File-classification assertion in `scripts/analyze.py`.**
+**Found:** `fp16_closed_c8.json` didn't match the run-file regex (its
+name skips the `_pcoff`/`_pcon` token every other fp16 file has), so it
+was silently absent from every table and plot the first time
+`scripts/analyze.py` ran. Caught only because the closed-loop table
+visibly had 2 of 3 arms and that looked wrong by eye -- nothing in the
+script itself would have flagged it if the gap had been less visually
+obvious (e.g. a missing single cell in a 60-row table).
+**Chose:** `assert_full_classification()` globs every `results/*.json`
+file and requires each one to either match a known pattern (run, repeat
+seed, repeat summary, calibration) or appear in
+`INTENTIONALLY_UNCLASSIFIED_PATTERNS` with a stated reason. Anything
+left over raises, listing exactly which files, before any table or plot
+gets built. Verified both directions: passes clean against the full
+H100 `results/` directory (63 classified, 8 calibration files
+explicitly excluded, 0 unaccounted), and fails loudly with the
+offending filename when a deliberately unrecognized file is dropped in.
+**Why:** the original bug was caught by luck (a visually obvious 2-of-3
+gap). The next naming mismatch might not be as visible -- a single
+missing repeat seed, a missing row in a 60-row table -- and shouldn't
+need to be.
