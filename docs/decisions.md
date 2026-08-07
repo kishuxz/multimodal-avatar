@@ -1036,7 +1036,113 @@ environment, it needs its own calibration pass and its own
 so this class of problem surfaces on the first calibration checkpoint
 next time, not after a full sweep's worth of GPU time.
 
-## Sweep v2: four fixes folded into the design, not bolted on after
+## H200 sweep results (fp16 + AWQ, FP8 excluded per issue #29)
+
+Ran with the calibration checkpoint's own derived rates (not recalibrated
+-- that measurement was already valid) and the four sweep-v2 fixes.
+Full matrix: `results/h200/summary.md`. One anomaly caught and fixed
+before anything else: `fp16_pcoff_open_c8_bargein0.0` initially showed
+TTFT p99 = 5.3s (581 of 2178 requests over 1s) -- a linear queueing
+drain from ~5.1s mean TTFT at t=0 down to steady-state ~16ms by t=7s,
+then flat for the remaining 13s. Checked whether this was systemic
+(every other cell's own load-level transition, including AWQ's and
+fp16-prefix-on's own c1->c8 jumps) -- none of the other 34 result files
+show anything like it (max TTFT elsewhere: tens of ms, this one: 5.5s).
+Isolated to this one run. Re-ran it alone (same config, fresh server):
+clean (p50 14.9ms, p99 41.4ms, in line with every other c8 cell). Kept
+the re-run, not the original -- one-off host/GPU hiccup, not a load
+level that's actually unstable at c8 (every other c8 cell, before and
+after, is clean).
+
+**Does AWQ's low-load penalty persist? Yes. Does the predicted
+high-load benefit stay smaller than H100's? No -- it's larger, and in
+the opposite shape from what H100 showed.**
+- c~=1: fp16 11.29+/-0.18ms vs AWQ 12.93+/-0.18ms -- AWQ +14.5% slower,
+  clearly outside the noise bands (H100: 8.39 vs 10.47ms, +24.8%). Same
+  direction, smaller relative gap, but still unambiguous -- persists.
+- c~=32: fp16 45.59+/-2.81ms vs **AWQ 35.76+/-0.73ms -- AWQ ~21.6%
+  *faster***, both repeat-validated (5 seeds each), well outside
+  combined noise. H100 showed no measurable difference at c~=32
+  (37.79 vs 37.31ms, inside noise). **This contradicts the pre-registered
+  prediction** ("AWQ's fixed dequant overhead should cost roughly the
+  same absolute time on H200... AWQ's relative low-load penalty should
+  hold or widen, not shrink" -- silent on high load beyond "smaller
+  benefit than H100's ~0"). H200's AWQ arm doesn't just fail to shrink
+  its high-load gap, it flips from "no difference" to "clearly ahead."
+  **Candidate mechanism, a hypothesis, not confirmed by profiling:** the
+  prediction's dequant-is-a-fixed-compute-cost argument was about low
+  load. At c~=32, if the workload is memory-bandwidth-bound rather than
+  compute-bound, AWQ's int4 weights (4x fewer bytes than fp16's bf16)
+  moving less data per forward pass could be a real bandwidth win --
+  the same mechanism the *H100 FP8* prediction argued for weight-only
+  quantization, just now showing up for AWQ instead, on hardware with
+  more bandwidth headroom to exploit it. Whether H200's specific
+  `awq_marlin`/`MacheteLinearKernel` path (recorded in
+  `results/h200/server_log_awq.txt`) is simply better-optimized than
+  whatever ran on H100 is a separate, untested alternative explanation.
+  This is a real, repeat-validated result either way -- the mechanism is
+  open, the direction and magnitude aren't.
+
+**Does the c~=1 prefix-caching reversal reproduce? Weakly, within
+noise -- not the same clean effect as H100's.**
+H100: +12.4% p50 / +4.4% p99 at c~=1 (caching on measurably worse).
+H200: +0.5% p50 / -0.6% p99 at c~=1 -- both inside the off-arm's own
+repeat noise band (+/-0.18ms on a 0.06ms swing). Present in direction at
+p50, absent at p99, neither clearly outside noise. The rest of the
+pattern holds cleanly: c~=8 -3.2%/-51.1%, c~=32 -32.8%/-39.8% (vs H100's
+-6.1%/-27.6% and -27.8%/-37.8% -- same shape, comparable-to-larger
+magnitude). **The lead finding (caching matters most at high
+concurrency) reproduces solidly; the specific low-load reversal doesn't
+reproduce as a distinct, trustworthy effect on this hardware/vLLM
+version -- report the c~=32 number with confidence, don't lean on the
+c~=1 reversal as if H200 confirmed it.**
+
+**Is barge-in landing mid-generation now? Yes, confirmed directly --
+this was the entire point of the fix.** H100: `aborted_total` was 0 at
+every c~=1 and c~=8 `bargein0.25` run. H200: abort rate is 25-27% at
+**every** concurrency (c1/c8/c32), matching the sampled 25% fraction
+almost exactly -- the scaled window (25-75% of each arm's calibrated
+service time) reliably fires now. Checked further, not just "it fires":
+`abort_before_first_token` is 0.0-0.9% at c1/c8 (aborts land after TTFT,
+during decode -- genuinely mid-generation) but 11.6-26.5% at c32 --
+exactly the documented limitation (`scripts/sweep.sh`'s own comment):
+the window is sized off *unqueued* service time, so at c~=32, where
+queueing measurably inflates actual wait time, a real fraction of
+"25-75% of unqueued service time" lands during the queued TTFT phase
+rather than post-TTFT decode. Predicted in the code comment before this
+run; confirmed by the data now, not asserted.
+
+**`finish_reason` distribution, now captured (#28): clean across every
+fp16/AWQ cell.** Overwhelmingly `stop` (natural EOS); a small `length`
+tail (~0.1-0.3% of completed requests, expected variance -- some
+responses are legitimately verbose); `null` exactly where aborts
+happened (matches `aborted_total` 1:1 in every file checked -- aborted
+requests never receive a finish_reason chunk). No arm, no cell, shows
+anything resembling FP8's 100%-`length` pattern. Nothing to investigate
+further -- this is what a healthy arm's distribution looks like, the
+contrast that makes FP8's finding legible as a bug rather than noise.
+
+## KV-cache arithmetic check: passes (issue #19 closed)
+
+First time this check has had anything to verify against --
+`scripts/sweep.sh`'s server-log capture (`results/h200/server_log_*.txt`)
+made it possible. Checked both fp16 and AWQ's startup logs directly.
+fp16: `Available KV cache memory: 120.53 GiB`, `GPU KV cache size:
+4,513,888 tokens` -> vLLM's own implied bytes/token = (120.53 * 2^30) /
+4,513,888 = **28,671.09**. `scripts/kv_cache_check.py`'s formula (28
+layers x 2 KV heads x 128 head_dim x 2 (K/V) x 2 bytes, `kv_cache_dtype=
+auto` resolving to the model's own 2-byte dtype) = **28,672**. Difference:
+-0.003%, fully explained by vLLM's log rounding "GiB" to 2 decimal
+places before printing -- working backward from a rounded display value
+can't recover more precision than that. AWQ: `Available KV cache memory:
+122.29 GiB`, `4,579,824 tokens` -> implied 28,670.95 vs the same 28,672
+expected (AWQ quantizes weights, not the KV cache -- `dtype=torch.float16`
+here vs fp16 arm's `bfloat16`, but both are 2-byte formats, so the
+byte-per-token arithmetic is unaffected either way) -- same match,
+-0.004%.
+**They agree.** The arithmetic in `scripts/kv_cache_check.py` was
+correct when it was first written with nothing to check it against;
+now there's something, and it holds.
 
 Before any GPU time goes toward a re-run, `scripts/sweep.sh` and
 `scripts/analyze.py` get four changes -- each fixes something the H100
