@@ -1818,3 +1818,175 @@ the prompt this phase started from). A smaller interval might trade
 back some of N=1-4's regression for a smaller quality cost at those
 step counts; untested, a real limitation, not investigated further
 here.
+
+## Phase 8: profiling AWQ's c≈32 advantage -- what's actually feasible on this pod
+
+Three competing explanations for AWQ's repeat-validated 21.6% TTFT p50
+win at c≈32 (Findings, #2), stated precisely because they make
+different predictions, not just different vibes:
+
+1. **Bandwidth.** int4 weights move less data per forward pass than
+   bf16; if H200 is memory-bound at this batch size, less data moved
+   means less time, full stop.
+2. **Kernel.** `awq_marlin`/`MacheteLinearKernel` is a better-optimized
+   GEMM implementation than whatever bf16 default vLLM selects here --
+   more efficient use of the hardware per FLOP, independent of bytes
+   moved.
+3. **Scheduling.** Smaller weights leave more KV-cache budget, which
+   could change admission/batching behavior (more concurrent sequences
+   actually resident) rather than per-forward-pass speed.
+
+**What tooling is actually available, checked before designing around
+it rather than assumed:** `ncu` (Nsight Compute) and `nsys` (Nsight
+Systems) are the standard tools for #1 and #2 directly -- per-kernel
+achieved-bandwidth-vs-peak and SM-throughput-vs-peak. Neither works on
+this pod. `nsight-compute` is installed (`/usr/local/cuda-12.8/bin/ncu`)
+but every invocation fails `ERR_NVGPUCTRPERM` -- confirmed this is a
+host/hypervisor-level restriction, not a container permissions problem
+fixable from inside it: this container runs as root
+(`uid=0(root) gid=0(root)`), but `/proc/sys/kernel` is a read-only
+mount here (`sysctl -w kernel.perf_event_paranoid=-1` fails with
+"Read-only file system"), meaning the restriction is enforced above
+the container, where a rented pod has no access. `nsys` isn't
+installed and isn't in the configured apt repos either. **Direct
+hardware-counter roofline measurement is not available on this
+allocation.** Adapted, not abandoned:
+- **torch.profiler is not blocked** -- it's still available via vLLM's
+  own `--profiler-config` + `/start_profile`/`/stop_profile` HTTP
+  endpoints (confirmed present in the installed 0.19.1, not wired into
+  the abbreviated `vllm serve --help` listing but real --
+  `vllm serve --help=all` shows it). This uses CUPTI's activity/tracing
+  API (kernel names, launch counts, durations), a different, less
+  restricted API than the hardware performance-counter path `ncu`
+  needs. Gives real kernel-level time breakdown -- which kernels
+  dominate, GEMM vs attention vs other -- just not achieved-bandwidth
+  or SM-utilization percentages directly.
+- **Bandwidth-vs-peak is estimated analytically instead of measured
+  directly:** real weight bytes (not assumed) from both checkpoints'
+  own safetensors files, and H200 SXM's published peak HBM3e bandwidth
+  (4.8 TB/s, a cited spec, not something this pod can self-report
+  without `ncu`), give a memory-bound *floor* time for reading all
+  weights once per forward pass. Comparing that floor against measured
+  latency indicates roofline distance without needing hardware
+  counters -- a real substitute, not an equivalent one: it can show a
+  measurement is *far* from its bandwidth floor (ruling bandwidth out
+  as the dominant cost) but can't distinguish "close to floor" from
+  "genuinely bandwidth-saturated" the way a direct `dram__throughput`
+  counter would.
+- **Scheduling gets checked against data already committed** --
+  KV-cache size (server startup logs) and realized concurrency /
+  request-timing patterns (already-recorded per-request timestamps) --
+  no new measurement needed for a first pass at this hypothesis.
+
+**Found while building the analytical model, before any prediction was
+written down -- the premise needs correcting, not just testing:**
+`Qwen/Qwen2.5-1.5B-Instruct`'s safetensors files total
+3,087,467,144 bytes (all BF16); `Qwen/Qwen2.5-1.5B-Instruct-AWQ`'s
+total 1,614,553,840 bytes (F16 scales/zeros + packed I32 weights).
+**Ratio: 1.91x, not 4x.** The "int4 is 4x smaller than fp16" arithmetic
+(16 bits / 4 bits) ignores AWQ's real on-disk format: per-group (typically
+128) fp16 scale and zero-point values add real bytes back on top of the
+packed 4-bit weights. **Every prediction below is stated against 1.91x,
+not the README's current "4x less data" framing -- that framing is
+already wrong regardless of what the profiling shows, and gets
+corrected in the writeup either way.**
+
+**Found in already-committed data, before any new measurement --
+context for the predictions, not a substitute for them:**
+- **ITL (decode-phase, steady-state) barely differs between arms, and
+  the gap isn't clearly outside noise:** aggregated across the 5 repeat
+  seeds each arm already has at c≈32 (`results/h200/
+  repeat_{fp16,awq}_c32_seed{0..4}.json`, `summary.itl_s.p50`): fp16
+  6.142 +/- 0.876ms, AWQ 5.844 +/- 0.063ms. Delta: 0.298ms (4.85%) --
+  smaller than fp16's own 0.876ms run-to-run stdev. **The repeat-
+  validated, clearly-real 21.6% effect is in TTFT, not ITL.** TTFT at
+  c≈32 under open-loop load is queueing delay plus prefill compute;
+  ITL is steady-state per-token decode alone. If AWQ's advantage were
+  primarily "less weight-streaming time per decode step," a comparably
+  clean effect should show up in ITL too -- it doesn't, at least not
+  outside this noise band. This is the single most important thing to
+  design the profiling run around: **whatever's driving the TTFT
+  number may not be a decode-phase effect at all.**
+- **The analytical decode-step floor is far below measured ITL, for
+  both arms, which the bandwidth story has to explain, not ignore:**
+  at 4.8 TB/s, reading all weights once costs 0.643ms (fp16) / 0.336ms
+  (AWQ) -- against measured ITL of 6.14ms / 5.84ms, roughly **9.5x**
+  the pure-weight-read floor for fp16. Most of a decode step's time
+  isn't spent streaming weights, for either arm -- KV-cache attention
+  reads (which scale with batch size and context length, and are
+  identical in dtype between arms, since neither arm quantizes the
+  KV-cache), kernel launch overhead, and scheduler/Python overhead are
+  all live candidates for the other ~90%, undifferentiated by this
+  calculation. **Curiously, the *floor delta* between arms (0.643 -
+  0.336 = 0.307ms) is close to the *measured* ITL delta (0.298ms)** --
+  suggestive, but not more than that, given the measured delta itself
+  isn't outside fp16's own noise band. Flagged as a coincidence worth
+  watching for in the profile, not a confirmed mechanism.
+- **KV-cache size barely differs (issue: does this move the needle on
+  scheduling?):** already committed, `results/h200/
+  server_log_fp16_pcoff.txt` / `server_log_awq.txt` -- fp16 4,513,888
+  tokens, AWQ 4,579,824 tokens, **+1.46%**. On a 141GB card at 0.9
+  utilization, a ~1.9x smaller weight footprint (a few GB either way)
+  is a rounding error against the KV-cache budget -- this by itself
+  argues against a *large* scheduling-headroom effect, though it
+  doesn't rule out smaller admission/batching differences not visible
+  in the raw cache-size number alone.
+
+**Predicted, for the torch.profiler run (the actual new measurement):**
+Given the ITL-vs-TTFT split above, the *default* expectation going in
+is **not** "AWQ's GEMM kernels dominate and are proportionally faster,
+confirming bandwidth" -- it's that the profile's decode-phase kernel
+mix looks *similar* in relative share between arms (since ITL barely
+differs), and that any large, clean difference shows up specifically
+in prefill-shaped kernels (large batch-1-per-request, long-sequence
+GEMMs, present when a request is newly admitted) rather than
+decode-shaped ones (small, batch~32, single-token GEMMs). If GEMM/Linear
+kernels dominate total CUDA time for both arms (expected, this is a
+transformer decoder) but AWQ's GEMM share of *decode-window* time isn't
+meaningfully smaller than fp16's, that would be consistent with the
+already-observed ITL noise-band result and would point away from
+decode-phase bandwidth as the TTFT story's main driver.
+
+**What would confirm bandwidth (hypothesis 1):** AWQ's GEMM/Linear
+kernels show meaningfully shorter aggregate duration than fp16's, in a
+window dominated by decode-phase traffic specifically, by a factor
+consistent with the corrected 1.91x weight-byte ratio (not 4x) scaled
+by whatever fraction of decode time GEMMs actually occupy -- and this
+shows up specifically where the analytical floor comparison says it
+should (the ~10% of decode time not already accounted for by
+KV-cache/attention/overhead).
+
+**What would confirm kernel efficiency (hypothesis 2) over bandwidth:**
+AWQ's GEMM kernels are faster by *more* than the byte-ratio predicts --
+i.e., faster per byte moved, not just moving fewer bytes -- which a
+raw kernel-duration comparison can show even without hardware counters
+(compute the implied bytes/s each arm's GEMM kernels are achieving from
+duration + known tensor sizes, and compare that computed rate, not just
+wall-clock time).
+
+**What would point at scheduling (hypothesis 3) over either:** GEMM-level
+kernel timing looks similar between arms (neither meaningfully faster
+per-kernel), but realized concurrency, batch composition, or queueing
+behavior differs in the request-level timestamp data -- i.e., the
+speedup is a property of what the scheduler does with the freed
+headroom, not of any single kernel running faster.
+
+**What would falsify the bandwidth story specifically, stated before
+running anything:** if decode-phase GEMM kernel time is a small share
+of total decode time for *both* arms (consistent with the ~9.5x-over-
+floor finding above suggesting attention/KV-cache/overhead already
+dominates), and AWQ's GEMM share isn't proportionally smaller, that
+directly contradicts "AWQ is faster because its GEMMs move less data
+in a memory-bound regime" -- there wouldn't be enough GEMM-bound time
+in the profile for a 1.91x per-kernel win to produce the observed
+21.6% TTFT effect, and the explanation has to be prefill-phase-specific
+or scheduling-related instead.
+
+**Explicitly allowed outcome, stated before running anything so it
+doesn't look like a retreat after the fact:** if the profile shows a
+mixed or ambiguous picture -- decode kernels close in share and timing,
+prefill kernels not cleanly separable from the captured trace, no
+single hypothesis cleanly favored -- that gets reported as "can't
+distinguish with this tooling," with a stated design for what would
+resolve it (most directly: `ncu` access on a pod where profiling
+counters aren't restricted), not stretched into a preferred story.
