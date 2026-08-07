@@ -60,6 +60,10 @@ CALIBRATION_RE = re.compile(r"^calibration_[A-Za-z0-9_]+\.json$")
 # by this script -- see scripts/perplexity.py / perplexity_multislice.py
 # and the README's Findings section for those numbers.
 PERPLEXITY_RE = re.compile(r"^perplexity_[A-Za-z0-9_]+\.json$")
+# scripts/verify_abort.py's own trial dumps: confirms abort-to-slot-free
+# latency, not a load-sweep cell -- see docs/decisions.md, "Re-verified
+# on H200."
+VERIFY_ABORT_RE = re.compile(r"^verify_abort_trial\d+\.json$")
 
 # filename arm token -> (canonical arm, prefix caching on/off). AWQ and FP8
 # only ever run with prefix caching off (docs/decisions.md: "prefix caching
@@ -187,6 +191,10 @@ INTENTIONALLY_UNCLASSIFIED_PATTERNS = [
                      "(forced-decoding on a wikitext slice, not a load-sweep "
                      "cell), read directly, not built into this script's "
                      "tables or plots"),
+    (VERIFY_ABORT_RE, "scripts/verify_abort.py's own abort-to-slot-free "
+                       "latency trial, not a load-sweep cell -- cited "
+                       "directly in docs/decisions.md, not built into this "
+                       "script's tables or plots"),
 ]
 
 
