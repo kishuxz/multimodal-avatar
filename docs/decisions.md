@@ -807,6 +807,62 @@ more interesting result than confirmation would be, and gets written up
 as such rather than smoothed over, same standard as the H100 predictions
 above.
 
+## FP8 on vLLM 0.19.1: not the same recipe as the H100's fp8_per_tensor
+
+**Predicted going in:** that it might differ -- the H100 FP8-flag entry
+above already flagged this as something to re-check on any vLLM version
+change, not assume.
+**Found, by reading the resolved config, not the docs or a comment**
+(same method as the original H100 investigation): constructed the exact
+config `vllm serve --quantization fp8` produces for
+`Qwen/Qwen2.5-1.5B-Instruct` via `EngineArgs(...).create_engine_config()`
+and inspected the resulting `Fp8Config` instance directly --
+`activation_scheme: dynamic`, `is_checkpoint_fp8_serialized: False`.
+Confirmed against the source
+(`vllm/model_executor/layers/quantization/fp8.py`): the online path
+(`Fp8OnlineLinearMethod`, used here since this is an unquantized bf16
+checkpoint being quantized on the fly, same as the H100 arm) sets
+`self.act_q_static = self.quant_config.activation_scheme == "static"`,
+and `activation_scheme` defaults to `"dynamic"` -- there is no CLI
+override that changes this for the bare `fp8` shorthand.
+**This means: activations are quantized too, dynamically -- this is
+W8A8, not weight-only.** The H100's `fp8_per_tensor` was confirmed
+weight-only (`activation=None` in its own resolved
+`QuantizationConfigArgs`, see the H100 FP8-flag entry above): weights
+move to fp8, activations stay in bf16. vLLM 0.19.1's plain `fp8` instead
+quantizes both weights *and* activations to `float8_e4m3fn`, with the
+activation scale computed dynamically per forward pass rather than a
+static value. **These are two different quantization recipes with the
+same arm label.** Any H200 FP8 number is not measuring the same
+intervention as the H100 FP8 number, on top of already not being
+comparable for hardware/vLLM-version reasons (see the hardware-change
+and environment-rebuild entries above) -- this is a third, independent
+reason, specific to what the FP8 arm even *is* on this pod.
+**Why it matters:** W8A8 dynamic and weight-only static have different
+expected performance shapes. Weight-only's win case (argued in the
+original H100 prediction) is memory-bandwidth-bound low-load decode,
+where only smaller weights matter and activations passing through
+unquantized costs nothing. W8A8 adds a real compute cost the H100 arm
+never paid -- quantizing activations on the fly, every forward pass, at
+every load level -- so the H200 FP8 arm's low-load number shouldn't be
+expected to reproduce the H100's small win, and its high-load number
+isn't testing the same "does weight-only pay off when compute-bound"
+question the H100 result answered. Any README claim about H200 FP8 has
+to say W8A8-dynamic, not carry over "weight-only" from the H100 section.
+**Also recorded, since the H100 run never captured it:** AWQ's kernel
+selection on this environment -- `The model is convertible to
+awq_marlin during runtime. Using awq_marlin kernel.`, then `Using
+MacheteLinearKernel for AWQMarlinLinearMethod`. No equivalent H100-side
+log capture exists to compare against (another gap issue #19's server-
+log-capture fix will close going forward), so this is a baseline for
+future comparison, not a diff against something already known.
+**How to apply:** when the H200 sweep actually runs and this FP8 arm's
+numbers get written up, the README/decisions.md scope note has to say
+"weight-and-activation FP8, dynamic scale (W8A8)" for the H200 arm,
+distinct from "weight-only, static scale" for the H100 arm -- not reuse
+the H100 arm's FP8 description. If a future vLLM version on either
+environment changes this again, re-verify the same way rather than
+assuming either recipe carries forward.
 ## Sweep v2: four fixes folded into the design, not bolted on after
 
 Before any GPU time goes toward a re-run, `scripts/sweep.sh` and
