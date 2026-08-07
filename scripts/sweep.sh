@@ -10,10 +10,13 @@
 #                     caching state, for fp16) via scripts/calibrate.py,
 #                     targeting concurrency ~= 1 / 8 / 32
 #   barge-in:         0.0 and 0.25
-#   prefix caching:   fp16 runs both on and off; awq/fp8 run the default
-#                     (on) only
+#   prefix caching:   off is the baseline for every arm (a large lever on
+#                     this multi-turn, eight-conversation workload -- see
+#                     docs/decisions.md for why leaving it on for one arm
+#                     and not another would confound the comparison); fp16
+#                     additionally runs with it on, as its own dimension
 #   closed-loop:      one contrast run per arm, at the concurrency=8 rate,
-#                     prefix caching left at its default (on)
+#                     prefix caching off
 #
 # --gpu-memory-utilization is fixed at 0.9 for every server start in this
 # script -- do not change it per-arm. See docs/decisions.md: it sets KV
@@ -155,27 +158,34 @@ run_closed_loop_contrast() {
 
 run_arm() {
     # run_arm <arm_label> <model> <extra vllm flags...>
+    #
+    # Prefix caching off is the baseline for every arm -- it's a large
+    # lever on this multi-turn, eight-conversation workload, and leaving
+    # it on for one arm but not another would make a cross-arm latency
+    # gap unattributable to the thing actually being compared
+    # (quantization). fp16 additionally runs with it on, as its own
+    # swept dimension, not as a difference baked into which arm gets
+    # which cache state. See docs/decisions.md.
     local arm_label="$1" model="$2"; shift 2
 
     if [ "$arm_label" = "fp16" ]; then
-        # fp16 gets both prefix-caching states -- see docs/decisions.md.
         local pc_state
-        for pc_state in on off; do
-            local flag="--enable-prefix-caching"
-            [ "$pc_state" = "off" ] && flag="--no-enable-prefix-caching"
+        for pc_state in off on; do
+            local flag="--no-enable-prefix-caching"
+            [ "$pc_state" = "on" ] && flag="--enable-prefix-caching"
             local label="${arm_label}_pc${pc_state}"
 
             start_server "$label" "$model" "$@" "$flag"
             local calib_json
             calib_json=$(run_calibration "$model" "$label")
             run_open_loop_matrix "$label" "$model" "$calib_json"
-            if [ "$pc_state" = "on" ]; then
+            if [ "$pc_state" = "off" ]; then
                 run_closed_loop_contrast "$arm_label" "$model"
             fi
             stop_server
         done
     else
-        start_server "$arm_label" "$model" "$@" "--enable-prefix-caching"
+        start_server "$arm_label" "$model" "$@" "--no-enable-prefix-caching"
         local calib_json
         calib_json=$(run_calibration "$model" "$arm_label")
         run_open_loop_matrix "$arm_label" "$model" "$calib_json"

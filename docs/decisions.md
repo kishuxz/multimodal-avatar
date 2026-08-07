@@ -382,3 +382,29 @@ critique flagged as a way to accidentally measure a setting instead of
 an intervention. `scripts/sweep.sh`'s `confirm_cache_cold` check also
 verifies the prefix cache is actually empty right after each restart,
 rather than assuming a fresh process implies a cold cache.
+
+## Prefix caching: off is the cross-arm baseline (caught before it shipped)
+
+**Found:** the first calibration pass ran fp16 with prefix caching on
+and AWQ/FP8 with it on too by default in the original `sweep.sh` --
+but that default was never actually deliberate, it was just what
+`--enable-prefix-caching` happened to be wired to for every non-fp16
+arm. The result: fp16's calibrated mean service time (60.7ms) looked
+faster than AWQ's (68.5ms), and there was no way to tell how much of
+that gap was quantization versus prefix caching, since both arms had
+it on. On a multi-turn workload built from eight fixed conversations
+(`harness.py`'s `USER_TURNS`), prefix caching is not a minor effect --
+repeated prefixes are exactly what it's designed to exploit.
+**Chose:** prefix caching off is now the baseline for every arm.
+AWQ and FP8 run with it off, full stop. fp16 runs both off (the same
+baseline as the other two arms) and on (its own additional dimension,
+not a different starting condition).
+**Why:** the whole point of comparing arms is that everything except
+the quantization is held equal. A cross-arm latency gap is only
+attributable to quantization if every other lever, including prefix
+caching, was in the same position for every arm. fp16-on-vs-off stays
+a legitimate, separate comparison -- it just isn't the number that
+gets compared against AWQ or FP8.
+**How to apply:** any future arm added to this sweep runs with prefix
+caching off by default, matching the baseline, unless prefix caching
+itself is the thing being studied for that arm.
