@@ -13,9 +13,11 @@ Two load modes:
              finished. Self-throttling, so it HIDES overload. Reported for
              comparison only.
 
-Barge-in: a configurable fraction of requests are aborted mid-stream after a
-sampled delay, simulating a user talking over the avatar. We record when the
-abort was issued and measure the effect on OTHER in-flight requests.
+Barge-in: a configurable fraction of requests are aborted after a sampled
+delay, simulating a user talking over the avatar -- possibly before the
+avatar has said anything yet, not just mid-stream. We record when the abort
+was issued, whether any token had arrived first, and measure the effect on
+OTHER in-flight requests.
 
 Usage:
   python harness.py --base-url http://localhost:8000/v1 \
@@ -28,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import random
@@ -95,7 +98,48 @@ class TurnResult:
     n_tokens: int = 0
     aborted: bool = False
     abort_at: float | None = None  # absolute wallclock the abort was issued
+    abort_before_first_token: bool = False
     error: str | None = None
+
+
+async def _read_stream(resp: aiohttp.ClientResponse, res: TurnResult, t0: float) -> None:
+    """Consume the SSE stream, updating `res` in place as tokens arrive.
+
+    Runs as its own task so a barge-in timer can cancel it without caring
+    whether any token has arrived yet -- cancellation is a well-defined
+    asyncio primitive, unlike hoping a mid-stream `resp.close()` surfaces a
+    specific exception type from inside an `async for`.
+    """
+    last_tok_t: float | None = None
+
+    async for raw in resp.content:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if data == "[DONE]":
+            break
+
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+        choices = chunk.get("choices") or []
+        if not choices:
+            continue
+        delta = choices[0].get("delta", {}) or {}
+        text = delta.get("content")
+        if not text:
+            continue
+
+        now = time.perf_counter()
+        if res.ttft is None:
+            res.ttft = now - t0
+        else:
+            res.itls.append(now - last_tok_t)
+        last_tok_t = now
+        res.n_tokens += 1
 
 
 async def run_turn(
@@ -133,8 +177,6 @@ async def run_turn(
         arrival=t0,
     )
 
-    last_tok_t: float | None = None
-
     try:
         async with session.post(
             f"{base_url}/chat/completions", json=payload
@@ -143,43 +185,25 @@ async def run_turn(
                 res.error = f"http {resp.status}: {(await resp.text())[:200]}"
                 return res
 
-            async for raw in resp.content:
-                line = raw.decode("utf-8", "replace").strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[len("data:"):].strip()
-                if data == "[DONE]":
-                    break
+            read_task = asyncio.create_task(_read_stream(resp, res, t0))
 
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-
-                choices = chunk.get("choices") or []
-                if not choices:
-                    continue
-                delta = choices[0].get("delta", {}) or {}
-                text = delta.get("content")
-                if not text:
-                    continue
-
-                now = time.perf_counter()
-                if res.ttft is None:
-                    res.ttft = now - t0
-                else:
-                    res.itls.append(now - last_tok_t)
-                last_tok_t = now
-                res.n_tokens += 1
-
-                # Barge-in: user speaks over the avatar. Break out of the
-                # stream, which drops the connection and signals the server
-                # to abort. We time this so we can correlate it against
-                # other requests' ITL.
-                if abort_after is not None and (now - t0) >= abort_after:
+            if abort_after is None:
+                await read_task
+            else:
+                # Barge-in: race the read against a wall-clock timer that
+                # knows nothing about token arrival. If the timer wins, the
+                # user "spoke over" the avatar -- whether or not it had
+                # said anything yet.
+                _, pending = await asyncio.wait({read_task}, timeout=abort_after)
+                if read_task in pending:
                     res.aborted = True
-                    res.abort_at = now
-                    break
+                    res.abort_at = time.perf_counter()
+                    res.abort_before_first_token = res.ttft is None
+                    read_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, aiohttp.ClientError):
+                        await read_task
+                else:
+                    await read_task
 
     except asyncio.TimeoutError:
         res.error = "timeout"
@@ -259,8 +283,17 @@ def summarize(results: list[TurnResult], warmup: int, wall: float) -> dict:
     # Discard warmup requests: the first few include CUDA graph capture,
     # allocator growth, and a cold prefix cache. Keeping them poisons p50.
     kept = results[warmup:]
-    ok = [r for r in kept if r.error is None and r.ttft is not None]
     errs = [r for r in kept if r.error is not None]
+    no_err = [r for r in kept if r.error is None]
+
+    # Requests with no observed TTFT: aborted before any token arrived, or
+    # (rarer) a completion that produced zero content tokens on its own.
+    # Neither belongs in the TTFT/ITL distributions -- there's no first-
+    # token time to report -- but they must still be counted somewhere, or
+    # the percentiles quietly get flattered by dropping exactly the
+    # requests a barge-in-heavy arm interrupts the fastest.
+    no_ttft = [r for r in no_err if r.ttft is None]
+    ok = [r for r in no_err if r.ttft is not None]
 
     ttfts = [r.ttft for r in ok]
     itls = [x for r in ok for x in r.itls]
@@ -272,7 +305,14 @@ def summarize(results: list[TurnResult], warmup: int, wall: float) -> dict:
         "requests_ok": len(ok),
         "requests_error": len(errs),
         "error_kinds": sorted({r.error.split(":")[0] for r in errs}),
-        "aborted": sum(1 for r in ok if r.aborted),
+        "requests_no_ttft": len(no_ttft),
+        "requests_aborted_before_first_token": sum(
+            1 for r in no_ttft if r.abort_before_first_token
+        ),
+        "requests_zero_token_no_abort": sum(
+            1 for r in no_ttft if not r.abort_before_first_token
+        ),
+        "aborted_total": sum(1 for r in kept if r.aborted),
         "wall_seconds": round(wall, 3),
         "output_tokens_total": toks,
         "output_tokens_per_sec": round(toks / wall, 2) if wall else None,

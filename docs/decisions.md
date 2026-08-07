@@ -97,3 +97,38 @@ a throwaway branch (rejected, nothing reached the remote; a follow-up
 push with a clean message succeeded), and separately by attempting a
 push with a correct message but the wrong author/committer identity
 (also rejected).
+
+## Barge-in timing (`harness.py`, issue #4)
+
+**Chose:** run the SSE read as its own `asyncio.Task` and race it against
+`asyncio.wait(..., timeout=abort_after)`. If the timer wins, cancel the
+read task -- regardless of whether it had produced a token yet.
+**Rejected:** the original design, which only checked for an abort inside
+the token-received branch of the read loop. That meant an abort sampled
+to happen before TTFT couldn't fire until the first token arrived, which
+made it structurally impossible to represent a user talking over the
+avatar before it had said anything -- the exact full-duplex case this
+repo exists to measure.
+**Rejected (alternative):** closing the response (`resp.close()`) from a
+timer task and relying on that to raise inside the `async for` loop.
+Cancelling the read task directly is a well-defined asyncio primitive;
+hoping a specific exception type surfaces from a mid-stream close is not,
+and that fragility isn't worth taking on in the same change. `resp.close()`
+still isn't called explicitly anywhere -- the connection-level propagation
+question is issue #1, deliberately kept separate.
+**Why:** the timer is now the single mechanism for both "abort before any
+token" and "abort mid-stream" -- it doesn't care which case it's in, so
+there's one code path to reason about instead of two.
+**How to apply:** `TurnResult.ttft` stays `None` when the abort beats the
+first token, and is never backfilled. `summarize()` partitions kept
+requests into `ok` (has a TTFT), `errs` (a real failure), and `no_ttft`
+(no error, no TTFT -- aborted before first token, or, rarer, a genuine
+zero-content-token completion). All three are counted explicitly in the
+summary; none are silently excluded. Verified with
+`--barge-in 1.0 --barge-in-min 0.001 --barge-in-max 0.005` against a local
+mock SSE server with a deliberate 2s pre-token delay: 12/12 requests came
+back with `ttft: null`, `abort_before_first_token: true`, and
+`requests_ok: 0` while `requests_no_ttft` correctly carried all 12 --
+nothing vanished from the summary. A second run with the abort window
+moved past the first token, and a third with no abort at all, reproduced
+the original TTFT/ITL/token-count behavior unchanged.
