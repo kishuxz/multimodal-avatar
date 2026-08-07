@@ -5,6 +5,10 @@ Measures, per request:
   - TTFT  : time to first token (arrival -> first content chunk)
   - ITL   : inter-token latency, per token after the first
   - E2E   : arrival -> final chunk (or abort)
+  - finish_reason: "stop" (natural EOS) vs "length" (hit max_tokens) --
+              the only way to tell "this arm's responses are verbose" apart
+              from "this arm never reaches EOS," which look identical in
+              E2E/token-count alone but mean very different things.
 
 Two load modes:
   - open   : Poisson arrivals at a fixed rate. Queueing delay shows up in TTFT,
@@ -37,6 +41,7 @@ import random
 import statistics
 import time
 import urllib.parse
+from collections import Counter
 from dataclasses import dataclass, field, asdict
 
 import aiohttp
@@ -102,6 +107,9 @@ class TurnResult:
     aborted: bool = False
     abort_at: float | None = None  # absolute wallclock the abort was issued
     abort_before_first_token: bool = False
+    finish_reason: str | None = None  # "stop" (EOS), "length" (hit
+                                       # max_tokens), or None if aborted/
+                                       # errored before the server sent one
     error: str | None = None
 
 
@@ -131,6 +139,14 @@ async def _read_stream(resp: aiohttp.ClientResponse, res: TurnResult, t0: float)
         choices = chunk.get("choices") or []
         if not choices:
             continue
+        # The chunk carrying finish_reason ("stop" on EOS, "length" on
+        # hitting max_tokens) typically has an empty delta -- no content,
+        # nothing to append to itls -- so it has to be read here, before
+        # the `if not text: continue` below, or it's silently skipped
+        # every time (issue #8: this used to be exactly that skip).
+        finish_reason = choices[0].get("finish_reason")
+        if finish_reason:
+            res.finish_reason = finish_reason
         delta = choices[0].get("delta", {}) or {}
         text = delta.get("content")
         if not text:
@@ -332,6 +348,15 @@ def summarize(results: list[TurnResult], warmup: int, wall: float) -> dict:
             1 for r in no_ttft if not r.abort_before_first_token
         ),
         "aborted_total": sum(1 for r in kept if r.aborted),
+        # "length" (hit max_tokens) vs "stop" (natural EOS), among
+        # completed requests -- a length-heavy arm is running into the
+        # token cap rather than the model choosing to stop, which is a
+        # different thing than that arm just being verbose, and different
+        # again from a real generation-quality issue. See issue #8: this
+        # was uncaptured (and the ambiguity it left unresolved) until an
+        # H200 FP8 arm needed exactly this to tell a broken-output bug
+        # apart from a slower-but-normal model.
+        "finish_reasons": dict(Counter(r.finish_reason for r in ok)),
         "wall_seconds": round(wall, 3),
         "output_tokens_total": toks,
         "output_tokens_per_sec": round(toks / wall, 2) if wall else None,
