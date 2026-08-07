@@ -308,6 +308,12 @@ def load_kept_requests(path):
 
 
 def plot_ttft_vs_arrival_rate(cells, out_path):
+    # Only the highest-rate point is labeled: at the two low-rate points
+    # all four series sit within ~2ms of each other, so per-point labels
+    # there collide into an unreadable smear rather than adding
+    # information -- the table has the exact numbers. The high-rate point
+    # is where the series actually separate, which is the point this plot
+    # exists to make.
     fig, ax = plt.subplots(figsize=(7, 5))
     for arm, prefix in ARM_ORDER:
         xs, ys = [], []
@@ -319,9 +325,8 @@ def plot_ttft_vs_arrival_rate(cells, out_path):
         if xs:
             label = f"{arm} (prefix {'on' if prefix else 'off'})" if arm == "fp16" else arm
             ax.plot(xs, ys, marker="o", label=label)
-            for x, y in zip(xs, ys):
-                ax.annotate(f"{y:.1f}", (x, y), textcoords="offset points",
-                             xytext=(4, 4), fontsize=8)
+            ax.annotate(f"{ys[-1]:.1f}", (xs[-1], ys[-1]), textcoords="offset points",
+                         xytext=(4, 4), fontsize=8)
     ax.set_xscale("log")
     ax.set_xlabel("Offered arrival rate (req/s, log scale)")
     ax.set_ylabel("TTFT p50 (ms)")
@@ -330,7 +335,7 @@ def plot_ttft_vs_arrival_rate(cells, out_path):
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -360,7 +365,7 @@ def plot_prefix_caching_effect(cells, out_path):
     fig.suptitle("Prefix caching on vs off, fp16 -- the largest lever in this sweep\n"
                   "(single runs, not yet repeat-validated -- see docs/decisions.md)")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -390,7 +395,7 @@ def plot_ttft_distribution_per_arm(results_dir, out_path):
     fig.suptitle("TTFT distribution per arm, prefix caching off, barge-in off\n"
                   "(c1/c32 pool all 5 repeat seeds; c8 has no repeats, single run)")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -445,7 +450,7 @@ def plot_itl_abort_windows(results_dir, out_path):
                   "(200ms windows, concurrency ≈ 32, barge-in 0.25 -- the only combination "
                   "where aborts overlap request lifetimes)")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -477,7 +482,7 @@ def plot_open_vs_closed(cells, out_path):
     fig.suptitle("Open-loop vs closed-loop at the same nominal concurrency (c≈8)\n"
                   "closed-loop hides queueing by construction -- this is how much")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
