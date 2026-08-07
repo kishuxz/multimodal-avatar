@@ -1,0 +1,265 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T23:37:35.542835+00:00",
+    "git_sha": null,
+    "git_dirty": null,
+    "git_sha_source": null,
+    "gpu": {
+      "name": "NVIDIA H200",
+      "driver_version": "570.124.06",
+      "driver_max_cuda_version": "12.8"
+    },
+    "vllm_version": "0.19.1",
+    "vllm_docker_image": null,
+    "model": "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--base-url",
+      "http://localhost:8000/v1",
+      "--model",
+      "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
+      "--label",
+      "awq",
+      "--rate",
+      "431.3068",
+      "--profiler-dir",
+      "/workspace/profiles/awq",
+      "--out",
+      "results/h200/profile_awq_bandwidth_awq.json"
+    ],
+    "extra": {
+      "script": "profile_awq_bandwidth.py",
+      "label": "awq",
+      "rate": 431.3068,
+      "profiler_dir": "/workspace/profiles/awq",
+      "warmup_before_profile_s": 6.0,
+      "profile_window_s": 1.5
+    }
+  },
+  "config": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
+    "label": "awq",
+    "rate": 431.3068,
+    "profiler_dir": "/workspace/profiles/awq",
+    "total_duration": 14.0,
+    "warmup_before_profile": 6.0,
+    "profile_window": 1.5,
+    "harness_warmup_requests": 10,
+    "seed": 0,
+    "out": "results/h200/profile_awq_bandwidth_awq.json"
+  },
+  "harness_summary": {
+    "requests_total": 4779,
+    "requests_after_warmup": 4769,
+    "requests_ok": 3178,
+    "requests_error": 1591,
+    "error_kinds": [
+      "client"
+    ],
+    "requests_no_ttft": 0,
+    "requests_aborted_before_first_token": 0,
+    "requests_zero_token_no_abort": 0,
+    "aborted_total": 0,
+    "finish_reasons": {
+      "stop": 3175,
+      "length": 3
+    },
+    "wall_seconds": 55.928,
+    "output_tokens_total": 70400,
+    "output_tokens_per_sec": 1258.76,
+    "ttft_s": {
+      "p50": 0.052260901778936386,
+      "p95": 46.88153088856488,
+      "p99": 47.16044319655746,
+      "mean": 12.32652994873362
+    },
+    "itl_s": {
+      "p50": 0.00994941033422947,
+      "p95": 0.06037760507315396,
+      "p99": 0.0945933862030506
+    },
+    "e2e_s": {
+      "p50": 0.2775894831866026,
+      "p95": 48.132498010993004,
+      "p99": 48.74763978485018,
+      "mean": 15.313422435180732,
+      "n": 3178
+    }
+  },
+  "trace_summary": {
+    "trace_file": "rank0.1786145806266522269.pt.trace.json.gz",
+    "total_kernel_time_us": 777601.9809999997,
+    "n_distinct_kernels": 75,
+    "n_kernel_launches": 36130,
+    "category_summary": {
+      "gemm": {
+        "total_us": 575420.9149999997,
+        "pct_of_total": 73.99941474686133
+      },
+      "attention": {
+        "total_us": 76579.725,
+        "pct_of_total": 9.848190574504212
+      },
+      "other": {
+        "total_us": 61894.60499999999,
+        "pct_of_total": 7.959676867129793
+      },
+      "sampling_sort": {
+        "total_us": 30705.161000000004,
+        "pct_of_total": 3.948698916701965
+      },
+      "norm_activation": {
+        "total_us": 19052.91400000007,
+        "pct_of_total": 2.450214179688423
+      },
+      "kv_cache": {
+        "total_us": 13948.660999999978,
+        "pct_of_total": 1.7938047151142718
+      }
+    },
+    "top_kernels": [
+      {
+        "name": "void cutlass::device_kernel<cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<256>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<18432>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<4, 2, 16, false, true>, cute::tuple<cute::C<128>, cute::C<256>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void> >(cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<256>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<18432>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<4, 2, 16, false, true>, cute::tuple<cute::C<128>, cute::C<256>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void>::Params)",
+        "total_us": 231956.03900000002,
+        "count": 1652,
+        "category": "gemm",
+        "pct_of_total": 29.829661532202312
+      },
+      {
+        "name": "void cutlass::device_kernel<cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<128>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<18432>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<4, 2, 16, false, true>, cute::tuple<cute::C<128>, cute::C<128>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void> >(cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<128>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<18432>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<4, 2, 16, false, true>, cute::tuple<cute::C<128>, cute::C<128>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void>::Params)",
+        "total_us": 206612.6929999996,
+        "count": 4172,
+        "category": "gemm",
+        "pct_of_total": 26.570494680877065
+      },
+      {
+        "name": "triton_poi_fused_machete_mm_mul_silu_slice_1",
+        "total_us": 34793.895000000004,
+        "count": 2688,
+        "category": "gemm",
+        "pct_of_total": 4.4745121347626835
+      },
+      {
+        "name": "void cutlass::device_kernel<flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, 128, cutlass::half_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, false, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::half_t, cutlass::arch::Sm90, 256, true, true, false, false, 1>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, false, true, true, true, false, true> > > >(flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, 128, cutlass::half_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, false, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::half_t, cutlass::arch::Sm90, 256, true, true, false, false, 1>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, false, true, true, true, false, true> > >::Params)",
+        "total_us": 33766.08499999999,
+        "count": 1036,
+        "category": "attention",
+        "pct_of_total": 4.342335259559994
+      },
+      {
+        "name": "_topk_topp_kernel",
+        "total_us": 30705.161000000004,
+        "count": 96,
+        "category": "sampling_sort",
+        "pct_of_total": 3.948698916701965
+      },
+      {
+        "name": "void cutlass::device_kernel<cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<64>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<18432>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<2, 2, 16, false, true>, cute::tuple<cute::C<128>, cute::C<64>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void> >(cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<64>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<18432>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<2, 2, 16, false, true>, cute::tuple<cute::C<128>, cute::C<64>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void>::Params)",
+        "total_us": 29391.98000000004,
+        "count": 1736,
+        "category": "gemm",
+        "pct_of_total": 3.779823189519376
+      },
+      {
+        "name": "void cutlass::device_kernel<flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, 128, cutlass::half_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, true, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::half_t, cutlass::arch::Sm90, 128, true, true, true, false, 1>, flash::VarlenDynamicPersistentTileScheduler<64, 128, 128, 128, true, true, true, true, false, true> > > >(flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, 128, cutlass::half_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, true, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::half_t, cutlass::arch::Sm90, 128, true, true, true, false, 1>, flash::VarlenDynamicPersistentTileScheduler<64, 128, 128, 128, true, true, true, true, false, true> > >::Params)",
+        "total_us": 27203.999,
+        "count": 1652,
+        "category": "attention",
+        "pct_of_total": 3.498447748939057
+      },
+      {
+        "name": "void cutlass::device_kernel<cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<32>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<10240>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<1, 1, 16, false, true>, cute::tuple<cute::C<128>, cute::C<32>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void> >(cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<32>, cute::C<64> >, cute::tuple<cute::C<2>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<10240>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<1, 1, 16, false, true>, cute::tuple<cute::C<128>, cute::C<32>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<32> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void>::Params)",
+        "total_us": 19872.173999999974,
+        "count": 1820,
+        "category": "gemm",
+        "pct_of_total": 2.555571421570231
+      },
+      {
+        "name": "triton_red_fused__to_copy_add_machete_mm_mean_mul_pow_rsqrt_2",
+        "total_us": 14437.456999999979,
+        "count": 2592,
+        "category": "gemm",
+        "pct_of_total": 1.8566641228759915
+      },
+      {
+        "name": "void vllm::reshape_and_cache_flash_kernel<unsigned short, unsigned short, (vllm::Fp8KVCacheDataType)0>(unsigned short const*, unsigned short const*, unsigned short*, unsigned short*, long const*, long, long, long, long, long, int, int, int, float const*, float const*, int)",
+        "total_us": 13948.660999999978,
+        "count": 2688,
+        "category": "kv_cache",
+        "pct_of_total": 1.7938047151142718
+      },
+      {
+        "name": "triton_red_fused__to_copy_add_machete_mm_mean_mul_pow_rsqrt_0",
+        "total_us": 11652.022999999972,
+        "count": 2688,
+        "category": "gemm",
+        "pct_of_total": 1.498455930502571
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+        "total_us": 11418.215,
+        "count": 192,
+        "category": "other",
+        "pct_of_total": 1.4683881058682648
+      },
+      {
+        "name": "void cutlass::device_kernel<cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<16>, cute::C<64> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<6144>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<1, 1, 8, false, true>, cute::tuple<cute::C<128>, cute::C<16>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<16> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void> >(cutlass::gemm::kernel::GemmUniversal<cute::tuple<int, int, int, int>, machete::MacheteCollectiveMma<cute::tuple<cutlass::integer_subbyte<4, false>, cutlass::half_t, cutlass::half_t>, machete::PrepackedLayoutBTemplate<cutlass::half_t, cutlass::integer_subbyte<4, false>, cutlass::half_t, float, cutlass::layout::ColumnMajor, cutlass::gemm::KernelTmaWarpSpecializedCooperative, machete::IlvBlkLayoutAuto>, 32, cutlass::half_t, cutlass::layout::ColumnMajor, 8, float, cute::tuple<cute::C<128>, cute::C<16>, cute::C<64> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::gemm::collective::StageCountAutoCarveout<6144>, cutlass::gemm::KernelTmaWarpSpecializedCooperative>, cutlass::epilogue::collective::CollectiveEpilogue<cutlass::epilogue::Sm90TmaWarpSpecialized<1, 1, 8, false, true>, cute::tuple<cute::C<128>, cute::C<16>, cute::C<64> >, cute::tuple<cute::C<128>, cute::C<16> >, void, cute::tuple<cute::C<1>, long, long>, cutlass::half_t, cute::tuple<cute::C<1>, long, long>, cutlass::epilogue::fusion::Sm90TreeVisitor<cutlass::epilogue::fusion::Sm90AccFetch>, cute::SM90_TMA_LOAD, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM75_U16x8_LDSM_T, cute::SM90_TMA_STORE, cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::tuple<cute::C<64>, cute::C<8> >, cute::tuple<cute::C<1>, cute::C<64> > > >, cute::SM90_U16x8_STSM_T, cute::Copy_Atom<cute::SM90_U32x4_STSM_N, cutlass::half_t>, void>, cutlass::gemm::StreamKScheduler, void>::Params)",
+        "total_us": 10397.110000000002,
+        "count": 1120,
+        "category": "gemm",
+        "pct_of_total": 1.3370734969874012
+      },
+      {
+        "name": "triton_poi_fused_3",
+        "total_us": 9540.991000000015,
+        "count": 2592,
+        "category": "norm_activation",
+        "pct_of_total": 1.2269761694447148
+      },
+      {
+        "name": "void at::native::(anonymous namespace)::cunn_SoftMaxForward<4, float, float, float, at::native::(anonymous namespace)::SoftMaxForwardEpilogue>(float*, float const*, int)",
+        "total_us": 9236.229,
+        "count": 96,
+        "category": "attention",
+        "pct_of_total": 1.187783625258023
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1} const&)::{lambda(int)#1})",
+        "total_us": 8622.310999999996,
+        "count": 192,
+        "category": "other",
+        "pct_of_total": 1.108833466307746
+      },
+      {
+        "name": "triton_poi_fused_add_cat_index_select_mul_split_split_with_sizes_sub_unsqueeze_view_4",
+        "total_us": 8371.479000000058,
+        "count": 2592,
+        "category": "norm_activation",
+        "pct_of_total": 1.07657634683933
+      },
+      {
+        "name": "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<float>, std::array<char*, 3ul> >(int, at::native::CUDAFunctor_add<float>, std::array<char*, 3ul>)",
+        "total_us": 7413.5499999999965,
+        "count": 192,
+        "category": "other",
+        "pct_of_total": 0.953386202857423
+      },
+      {
+        "name": "void cutlass::device_kernel<flash::FlashAttnFwdCombine<cute::tuple<cute::C<8>, cute::C<128> >, 5, 256, 1, false, true, cutlass::half_t, float, cutlass::arch::Sm90> >(flash::FlashAttnFwdCombine<cute::tuple<cute::C<8>, cute::C<128> >, 5, 256, 1, false, true, cutlass::half_t, float, cutlass::arch::Sm90>::Params)",
+        "total_us": 6189.382000000009,
+        "count": 1652,
+        "category": "attention",
+        "pct_of_total": 0.7959575915740899
+      },
+      {
+        "name": "void vllm::apply_repetition_penalties_kernel<float>(float*, bool const*, bool const*, float const*, int, int, int)",
+        "total_us": 6167.443999999998,
+        "count": 96,
+        "category": "other",
+        "pct_of_total": 0.7931363539054566
+      }
+    ]
+  }
+}

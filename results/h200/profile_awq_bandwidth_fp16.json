@@ -1,0 +1,265 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T23:35:50.729550+00:00",
+    "git_sha": null,
+    "git_dirty": null,
+    "git_sha_source": null,
+    "gpu": {
+      "name": "NVIDIA H200",
+      "driver_version": "570.124.06",
+      "driver_max_cuda_version": "12.8"
+    },
+    "vllm_version": "0.19.1",
+    "vllm_docker_image": null,
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--base-url",
+      "http://localhost:8000/v1",
+      "--model",
+      "Qwen/Qwen2.5-1.5B-Instruct",
+      "--label",
+      "fp16",
+      "--rate",
+      "475.0453",
+      "--profiler-dir",
+      "/workspace/profiles/fp16",
+      "--out",
+      "results/h200/profile_awq_bandwidth_fp16.json"
+    ],
+    "extra": {
+      "script": "profile_awq_bandwidth.py",
+      "label": "fp16",
+      "rate": 475.0453,
+      "profiler_dir": "/workspace/profiles/fp16",
+      "warmup_before_profile_s": 6.0,
+      "profile_window_s": 1.5
+    }
+  },
+  "config": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "label": "fp16",
+    "rate": 475.0453,
+    "profiler_dir": "/workspace/profiles/fp16",
+    "total_duration": 14.0,
+    "warmup_before_profile": 6.0,
+    "profile_window": 1.5,
+    "harness_warmup_requests": 10,
+    "seed": 0,
+    "out": "results/h200/profile_awq_bandwidth_fp16.json"
+  },
+  "harness_summary": {
+    "requests_total": 5084,
+    "requests_after_warmup": 5074,
+    "requests_ok": 3690,
+    "requests_error": 1384,
+    "error_kinds": [
+      "client"
+    ],
+    "requests_no_ttft": 0,
+    "requests_aborted_before_first_token": 0,
+    "requests_zero_token_no_abort": 0,
+    "aborted_total": 0,
+    "finish_reasons": {
+      "stop": 3685,
+      "length": 5
+    },
+    "wall_seconds": 100.607,
+    "output_tokens_total": 76131,
+    "output_tokens_per_sec": 756.71,
+    "ttft_s": {
+      "p50": 0.09862370230257511,
+      "p95": 90.90622695293277,
+      "p99": 91.91643466476351,
+      "mean": 22.80857651506659
+    },
+    "itl_s": {
+      "p50": 0.01682140678167343,
+      "p95": 0.05115462839603424,
+      "p99": 0.09822189658880234
+    },
+    "e2e_s": {
+      "p50": 0.5173261072486639,
+      "p95": 92.0642025096342,
+      "p99": 93.02422378394753,
+      "mean": 25.3349366892109,
+      "n": 3690
+    }
+  },
+  "trace_summary": {
+    "trace_file": "rank0.1786145653430399825.pt.trace.json.gz",
+    "total_kernel_time_us": 1403591.1280000003,
+    "n_distinct_kernels": 235,
+    "n_kernel_launches": 96438,
+    "category_summary": {
+      "gemm": {
+        "total_us": 811691.1639999998,
+        "pct_of_total": 57.82960206912904
+      },
+      "attention": {
+        "total_us": 188486.307,
+        "pct_of_total": 13.42886138562141
+      },
+      "norm_activation": {
+        "total_us": 144919.14000000048,
+        "pct_of_total": 10.324882874295316
+      },
+      "other": {
+        "total_us": 144004.96199999994,
+        "pct_of_total": 10.259751513618852
+      },
+      "sampling_sort": {
+        "total_us": 84692.91400000003,
+        "pct_of_total": 6.034016054282157
+      },
+      "kv_cache": {
+        "total_us": 29796.640999999956,
+        "pct_of_total": 2.1228861030532213
+      }
+    },
+    "top_kernels": [
+      {
+        "name": "void cutlass::device_kernel<flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, 128, cutlass::bfloat16_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, true, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 128, true, true, true, false, 1>, flash::VarlenDynamicPersistentTileScheduler<64, 128, 128, 128, true, true, true, true, false, true> > > >(flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, 128, cutlass::bfloat16_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, true, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<64>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 128, true, true, true, false, 1>, flash::VarlenDynamicPersistentTileScheduler<64, 128, 128, 128, true, true, true, true, false, true> > >::Params)",
+        "total_us": 87911.5199999999,
+        "count": 5656,
+        "category": "attention",
+        "pct_of_total": 6.26332827603908
+      },
+      {
+        "name": "_topk_topp_kernel",
+        "total_us": 84485.39500000003,
+        "count": 258,
+        "category": "sampling_sort",
+        "pct_of_total": 6.019231193088592
+      },
+      {
+        "name": "nvjet_tst_256x160_64x4_1x2_h_bz_coopA_TNT",
+        "total_us": 66592.50200000002,
+        "count": 308,
+        "category": "gemm",
+        "pct_of_total": 4.744437370082893
+      },
+      {
+        "name": "triton_poi_fused_mul_silu_slice_1",
+        "total_us": 63820.46200000107,
+        "count": 7280,
+        "category": "norm_activation",
+        "pct_of_total": 4.546941108906828
+      },
+      {
+        "name": "void cutlass::device_kernel<flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, 128, cutlass::bfloat16_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, false, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 256, true, true, false, false, 1>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, false, true, true, true, false, true> > > >(flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, 128, cutlass::bfloat16_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, true, true, true, false, false, cutlass::bfloat16_t, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<128>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 256, true, true, false, false, 1>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, false, true, true, true, false, true> > >::Params)",
+        "total_us": 51306.98700000007,
+        "count": 1512,
+        "category": "attention",
+        "pct_of_total": 3.6554083291412813
+      },
+      {
+        "name": "nvjet_tst_192x208_64x4_1x2_h_bz_coopB_TNT",
+        "total_us": 42264.12699999999,
+        "count": 140,
+        "category": "gemm",
+        "pct_of_total": 3.0111423588308677
+      },
+      {
+        "name": "nvjet_tst_128x288_64x4_2x1_v_bz_coopA_TNT",
+        "total_us": 36645.827999999994,
+        "count": 224,
+        "category": "gemm",
+        "pct_of_total": 2.610862043009436
+      },
+      {
+        "name": "nvjet_tst_192x192_64x4_1x2_h_bz_coopB_TNN",
+        "total_us": 31688.625000000004,
+        "count": 140,
+        "category": "gemm",
+        "pct_of_total": 2.257682053402093
+      },
+      {
+        "name": "triton_red_fused__to_copy_add_mean_mul_pow_rsqrt_2",
+        "total_us": 31606.530999999963,
+        "count": 7280,
+        "category": "norm_activation",
+        "pct_of_total": 2.2518331991052567
+      },
+      {
+        "name": "void vllm::reshape_and_cache_flash_kernel<__nv_bfloat16, __nv_bfloat16, (vllm::Fp8KVCacheDataType)0>(__nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16*, __nv_bfloat16*, long const*, long, long, long, long, long, int, int, int, float const*, float const*, int)",
+        "total_us": 29796.640999999956,
+        "count": 7280,
+        "category": "kv_cache",
+        "pct_of_total": 2.1228861030532213
+      },
+      {
+        "name": "nvjet_tst_192x208_64x4_2x1_v_bz_coopB_TNT",
+        "total_us": 27598.165999999976,
+        "count": 171,
+        "category": "gemm",
+        "pct_of_total": 1.966253950274326
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+        "total_us": 26363.229000000003,
+        "count": 520,
+        "category": "other",
+        "pct_of_total": 1.878269851816846
+      },
+      {
+        "name": "triton_red_fused__to_copy_add_mean_mul_pow_rsqrt_0",
+        "total_us": 25396.355999999538,
+        "count": 7280,
+        "category": "norm_activation",
+        "pct_of_total": 1.8093841926877394
+      },
+      {
+        "name": "void at::native::(anonymous namespace)::cunn_SoftMaxForward<4, float, float, float, at::native::(anonymous namespace)::SoftMaxForwardEpilogue>(float*, float const*, int)",
+        "total_us": 23503.771000000008,
+        "count": 262,
+        "category": "attention",
+        "pct_of_total": 1.6745454236014523
+      },
+      {
+        "name": "triton_poi_fused_3",
+        "total_us": 22216.494999999897,
+        "count": 7020,
+        "category": "norm_activation",
+        "pct_of_total": 1.5828323902030175
+      },
+      {
+        "name": "void cutlass::device_kernel<flash::FlashAttnFwdCombine<cute::tuple<cute::C<8>, cute::C<128> >, 5, 256, 1, false, true, cutlass::bfloat16_t, float, cutlass::arch::Sm90> >(flash::FlashAttnFwdCombine<cute::tuple<cute::C<8>, cute::C<128> >, 5, 256, 1, false, true, cutlass::bfloat16_t, float, cutlass::arch::Sm90>::Params)",
+        "total_us": 22215.270999999993,
+        "count": 5768,
+        "category": "attention",
+        "pct_of_total": 1.5827451853200933
+      },
+      {
+        "name": "nvjet_tst_256x136_64x4_2x1_v_bz_coopA_TNT",
+        "total_us": 20242.67800000001,
+        "count": 140,
+        "category": "gemm",
+        "pct_of_total": 1.4422061807161841
+      },
+      {
+        "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1} const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1}>(at::TensorIteratorBase&, at::native::compare_scalar_kernel<long>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, long)::{lambda(long)#1} const&)::{lambda(int)#1})",
+        "total_us": 19915.173000000003,
+        "count": 520,
+        "category": "other",
+        "pct_of_total": 1.418872818637537
+      },
+      {
+        "name": "nvjet_tst_192x176_64x4_2x1_v_bz_coopB_TNT",
+        "total_us": 19322.826999999994,
+        "count": 142,
+        "category": "gemm",
+        "pct_of_total": 1.3766706425063688
+      },
+      {
+        "name": "nvjet_tst_256x152_64x4_2x1_v_bz_coopA_TNT",
+        "total_us": 18884.050999999996,
+        "count": 140,
+        "category": "gemm",
+        "pct_of_total": 1.3454096868586072
+      }
+    ]
+  }
+}
