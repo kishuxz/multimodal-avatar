@@ -611,3 +611,95 @@ is what's reported here), the fix is deriving `--barge-in-min`/`--max`
 per arm from that arm's own service-time distribution, the same way
 `scripts/calibrate.py` already derives arrival rate per arm via Little's
 Law -- not attempted here, out of scope for this pass.
+
+## Hardware change: H100 80GB HBM3 -> H200 SXM 141GB (new pod)
+
+**Found:** the pod behind every Phase 1-3 result (`results/*.json`, all
+of `docs/decisions.md` above this entry, the whole Phase 5 write-up) was
+stopped and its H100 reclaimed. The replacement pod is different
+hardware, not a restart of the same one: `NVIDIA H200`, 143771 MiB
+(~141GB, vs the H100's 80GB), driver `570.124.06` (vs `580.126.09`),
+datacenter `US-NC-1` (vs `US-CA-2`), and a differently-provisioned
+`/workspace` (volume disk, not the `avatar-bench-vol` network volume) --
+confirmed empty on first login, so nothing carried over and the
+environment gets rebuilt from scratch, not resumed.
+**Why it matters:** every number in `results/*.json` and everything
+derived from them (`results/summary.md`, `plots/*.png`,
+`results/kv_cache_check.md`, and the corrected-findings section of this
+file) is scoped to the H100 80GB HBM3 that produced it. GPU model,
+memory capacity, and driver all differ on the new pod -- any of those
+alone would be enough to invalidate a direct comparison; here all three
+changed at once.
+**Chose:** state this plainly, in both this file and the README, before
+any new measurement runs -- not as a footnote on a table, as its own
+visible fact. **No table in this repo mixes H100 and H200 numbers.**
+Phase 1-3 gets fully re-run on the H200 (see the prediction entry
+immediately below for what's expected to change and why) rather than
+patched or extended in place.
+**How to apply:** any future hardware change gets the same treatment --
+recorded here before remeasuring, stated in the README's Setup section,
+and no silent mixing of tables across the boundary. If a reader only
+skims one number from this repo, which GPU produced it should never be
+something they have to dig for.
+
+## Predictions, stated before measuring (Phase 3 re-run on H200)
+
+The H100 run's central story (see "Predictions, stated before measuring
+(Phase 3 sweep)" above) was that Qwen2.5-1.5B on an 80GB card leaves
+almost no memory pressure for quantization to relieve -- weights are a
+few GB, KV cache has enormous headroom even unquantized, so any
+quantization benefit should show up only at high concurrency, if at
+all. The H200 has 140.4GB (143771 MiB reported by `nvidia-smi`), ~1.76x
+the H100's 80GB. That doesn't change the story; it makes the same
+argument stronger.
+
+**Predicted:** at `--gpu-memory-utilization 0.9`, the KV cache budget
+goes from ~72GB (H100) to ~126GB (H200) -- headroom the 1.5B model was
+already not using up on the H100. **AWQ and FP8 should have even less
+memory pressure to relieve on H200 than they did on H100**, not more --
+if anything, whatever high-concurrency benefit either arm showed on the
+H100 (FP8's real ~14% win at c~=32, in the direction bandwidth-bound
+weight-loading predicts) should show up at a *higher* concurrency on
+H200 than it did on H100, if it shows up in the 1/8/32 range tested
+here at all. A same-or-larger benefit at c~=32 would be the surprise,
+not the null result.
+
+**Predicted, AWQ specifically:** the dequant step (int4 -> bf16 per
+matmul) is a compute cost, not a memory-bandwidth cost. H200 is the
+same Hopper compute architecture as H100 SXM -- its headline change is
+memory (more capacity, ~1.4x more HBM bandwidth: HBM3e vs HBM3), not
+more FLOPs. So AWQ's fixed dequant overhead should cost roughly the
+same *absolute* time on H200 as it did on H100 (8.39ms fp16 vs 10.47ms
+AWQ, both at c~=1). If everything else gets faster from the extra
+bandwidth, that fixed cost becomes a *larger share* of AWQ's own total
+latency, not a smaller one -- AWQ's relative low-load penalty should
+hold or widen, not shrink.
+
+**Predicted, FP8 specifically:** the low-load FP8 win on H100 (8.23 vs
+8.39ms, marginal) was attributed to halving the bytes moved per forward
+pass while memory-bandwidth-bound at low batch size. More available
+bandwidth on H200 doesn't remove that halving, but it can shrink its
+*share* of total TTFT if other fixed overheads (kernel launch, Python/
+async overhead in the harness's own request path) don't shrink at the
+same rate -- so the low-load FP8 edge may be smaller in absolute ms, or
+harder to distinguish from noise, than the already-marginal H100 number
+was.
+
+**Predicted, and the reason this isn't just "H200 is faster so multiply
+by a constant":** concurrency ~=1/8/32 is derived per-arm from that
+arm's own H200 service time via `scripts/calibrate.py` (Little's Law),
+same procedure as the H100 run. If H200's extra bandwidth changes
+low-load service time by a different factor than it changes the
+compute-bound regime's onset, "concurrency ~= 32" on H200 is not
+guaranteed to land at the same point on the memory-bound-to-compute-
+bound curve that "concurrency ~= 32" landed at on H100 -- the label is
+portable, the physical regime it names might not be. If quantization
+effects at c~=32 look different in kind (not just degree) from the H100
+result, this is the first place to look before concluding the mechanism
+changed.
+
+**If the data contradicts any of this** -- AWQ or FP8 showing a larger
+benefit on H200 than H100 at the same nominal concurrency -- that's a
+more interesting result than confirmation would be, and gets written up
+as such rather than smoothed over, same standard as the H100 predictions
+above.
