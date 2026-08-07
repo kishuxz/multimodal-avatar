@@ -1489,3 +1489,93 @@ number implies either way. Reported as what it is -- a real, repeatable
 signal that AWQ costs something on a standard proxy metric, now with an
 actual cross-sample error bar behind it -- not as a validated statement
 about conversational quality.
+
+## Phase 6 model choice: Stable Diffusion 1.5, not a video model
+
+**Chose:** `stable-diffusion-v1-5/stable-diffusion-v1-5` (a maintained
+mirror of `runwayml/stable-diffusion-v1-5`, identical weights -- same
+resolved commit SHA on both, confirmed via `HfApi.model_info` before
+picking one), fp16, DPM-Solver++ (`DPMSolverMultistepScheduler`),
+512x512 -- SD1.5's native trained resolution, not a chosen-for-the-story
+number. Runs entirely through `diffusers` -- no vLLM, no server, no HTTP;
+`torch.cuda.synchronize()` around each stage in a plain Python process.
+**Rejected:** a genuine video diffusion model (AnimateDiff, SVD,
+CogVideoX). This project's actual subject is *frame-by-frame* real-time
+generation -- the 40ms budget in the prompt is a per-frame number, which
+is how a real streaming avatar system would have to work (one frame
+conditioned on the latest driving signal, not a whole clip generated
+ahead of time) -- so a single-image text-to-image UNet model is the
+right proxy shape, not a compromise. A real video model adds temporal
+attention/frame-conditioning machinery this project has no way to
+validate is being used realistically, for no benefit to the actual
+question being asked (per-frame stage cost).
+**Rejected:** SDXL. Heavier UNet, native 1024x1024 -- both push per-step
+cost up, which sounded like it would produce a more "production-scale"
+number, but a pilot run (not the committed measurement, see below)
+showed SD1.5 already lands within a small factor of the 40ms budget at
+step counts as low as 1 -- the tension the ceiling question is about
+(does anything fit, and by how much) is visible at SD1.5's native
+resolution without needing to reach for a heavier model to make the
+constraint feel real.
+**Rejected:** a turbo/distilled variant (SDXL-Turbo, SD-Turbo, LCM).
+These are trained specifically to be good at 1-4 steps -- using one
+would answer "how fast can a model *already built for* the low-step
+regime go," not "what happens when you point a standard, undistilled
+diffusion model at a real-time budget," which is the more informative
+question for a stage-cost breakdown: a turbo model's designers already
+made the VAE-decode-vs-step-count tradeoff invisible by construction
+(few steps is the intended operating point, so nothing here would be
+surprising). A standard model exposes the actual tension.
+**Scheduler:** DPM-Solver++ specifically because it's designed to reach
+reasonable quality in fewer steps than the DDPM-style schedulers SD1.5
+shipped with originally -- the natural choice for a "how few steps can
+this get away with" question, not an arbitrary pick.
+**This is a proxy for real-time avatar video generation, not the thing
+itself,** stated here and restated in the README when this phase's
+findings land there: no lip-sync, no audio conditioning, no temporal
+consistency across frames, no actual avatar-specific model -- a
+standard text-to-image diffusion model's per-frame cost structure,
+measured under the same 40ms/100ms constraint a real system would face.
+What generalizes: the stage-cost shape (fixed conditioning + VAE cost,
+step count as the one lever that scales). What doesn't: absolute
+milliseconds for any actual avatar-specific architecture, which this
+project has not measured and does not claim to.
+
+## Phase 6: pre-registered hypothesis (stated before the committed measurement)
+
+A pilot run (`torch.cuda.synchronize()`-timed, discarded, not the
+committed measurement below -- used only to confirm the timing
+methodology itself works before committing to it) surfaced something
+that has to be handled before any real number gets reported: the
+**first** call to every stage -- text encoder, first UNet step, VAE
+decode -- is dominated by CUDA/cuDNN kernel warmup, not real cost
+(conditioning: 114.73ms unwarmed vs 6.2-6.7ms warmed; first denoising
+step: 298.81ms unwarmed vs ~18ms steady-state). Every run in the
+committed measurement below discards one full warmup generation before
+any timed run, the same discipline `scripts/calibrate.py` and
+`scripts/sweep.sh` already use for the LLM sweep (`--warmup`), applied
+here for the same reason: an unwarmed first call isn't a real number,
+it's a one-time cost that amortizes to nothing over a real streaming
+session.
+
+**Predicted, from the pilot's warmed numbers and from the architecture,
+not just the pilot in isolation:** VAE decode is a single fixed-cost
+forward pass through a deep convolutional network, independent of how
+many denoising steps ran before it -- structurally, it's the same shape
+of cost as *one* denoising step (also a single forward pass through a
+comparably-sized network), just through a different network. If that
+holds, VAE decode should be comparable in magnitude to a single
+denoising step, not a rounding error next to it -- and at low step
+counts (where total time is conditioning + a small N x step_cost + a
+fixed VAE cost), the fixed VAE cost should make up a large,
+non-shrinking share of total frame time. The pilot's warmed numbers are
+consistent with this: ~21ms VAE decode against an ~18-23ms single
+step -- roughly the same order of magnitude, not one dwarfing the other.
+
+**What would falsify this:** VAE decode taking a small fraction (order
+10-20% or less) of a single denoising step's time, at any step count --
+that would mean step count is the only real lever, and VAE decode is a
+correctly-ignorable fixed cost, contradicting the prediction. The
+committed measurement (`scripts/diffusion_bench.py`, repeats +
+`torch.cuda.synchronize()` around every stage, `results/h200/diffusion/`)
+is what actually decides this, not the pilot -- report below.
