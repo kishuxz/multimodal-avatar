@@ -406,23 +406,37 @@ def abort_window_itls(path, window_s=0.2):
     those are truncated by definition and don't speak to collateral
     impact on the other requests sharing that window. This is the
     "effect on OTHER in-flight requests" harness.py's own docstring
-    names as the reason barge-in records what it does."""
+    names as the reason barge-in records what it does.
+
+    Also returns each arm's abort rate and window count -- these differ
+    a lot by arm (see plot_itl_abort_windows) not because barge-in
+    itself behaves differently, but because the same fixed 0.3-1.2s
+    sampled abort delay only lands inside a request that's still in
+    flight, and how often that happens depends on how long the arm's
+    own requests take -- i.e. on decode speed, which is exactly the ITL
+    comparison already in docs/decisions.md."""
     _, kept = load_kept_requests(path)
     if not kept:
-        return [], [], 0
+        return [], [], {"n_windows": 0, "n_aborted": 0, "abort_rate_pct": 0.0}
     t0 = min(r["arrival"] for r in kept)
 
     def window_of(r):
         return int((r["arrival"] - t0) // window_s)
 
     abort_windows = {window_of(r) for r in kept if r["aborted"]}
+    n_aborted = sum(1 for r in kept if r["aborted"])
     with_abort, without_abort = [], []
     for r in kept:
         if r["aborted"]:
             continue
         bucket = with_abort if window_of(r) in abort_windows else without_abort
         bucket.extend(x * 1000 for x in r["itls"])
-    return with_abort, without_abort, len(abort_windows)
+    stats = {
+        "n_windows": len(abort_windows),
+        "n_aborted": n_aborted,
+        "abort_rate_pct": n_aborted / len(kept) * 100 if kept else 0.0,
+    }
+    return with_abort, without_abort, stats
 
 
 def plot_itl_abort_windows(results_dir, out_path):
@@ -430,6 +444,16 @@ def plot_itl_abort_windows(results_dir, out_path):
     # sweep -- at c1/c8 requests finish faster than the sampled abort delay
     # (0.3-1.2s, harness.py's --barge-in-min/--barge-in-max), so no abort
     # ever fires there. Restricting to c32 is a finding, not a simplification.
+    #
+    # Window counts below are NOT randomly different by arm (8 / 31 / 16 as
+    # of this sweep): the same fixed 0.3-1.2s sampled abort delay only lands
+    # inside a still-in-flight request, and how often that happens tracks
+    # each arm's own decode speed (ITL) at this load point -- AWQ is the
+    # slowest here (docs/decisions.md), so more of its requests are still
+    # running when the delay elapses, so it gets aborted -- and re-plotted
+    # against a with/without-abort split -- far more often. Abort *rate* is
+    # shown per-arm below so this isn't mistaken for barge-in behaving
+    # differently per arm; it's exposure, not mechanism.
     arms = [("fp16", "fp16_pcoff_open_c32_bargein0.25.json"),
             ("awq", "awq_open_c32_bargein0.25.json"),
             ("fp8", "fp8_open_c32_bargein0.25.json")]
@@ -438,17 +462,21 @@ def plot_itl_abort_windows(results_dir, out_path):
         path = os.path.join(results_dir, fname)
         if not os.path.exists(path):
             continue
-        with_abort, without_abort, n_windows = abort_window_itls(path)
+        with_abort, without_abort, stats = abort_window_itls(path)
         data = [without_abort, with_abort]
         ax.boxplot(data, tick_labels=[f"no abort\n(n={len(without_abort)})",
                                        f"abort in window\n(n={len(with_abort)})"],
                     showfliers=False)
-        ax.set_title(f"{arm} (c≈32, {n_windows} abort windows)")
+        ax.set_title(f"{arm} (c≈32, {stats['n_windows']} windows, "
+                      f"{stats['n_aborted']} aborts, {stats['abort_rate_pct']:.2f}% abort rate)",
+                      fontsize=9)
         ax.grid(alpha=0.3, axis="y")
     axes[0].set_ylabel("ITL (ms), non-aborted requests only")
     fig.suptitle("ITL of OTHER in-flight requests: windows with a barge-in abort vs without\n"
-                  "(200ms windows, concurrency ≈ 32, barge-in 0.25 -- the only combination "
-                  "where aborts overlap request lifetimes)")
+                  "(200ms windows, concurrency ≈ 32, barge-in 0.25 -- the only combination\n"
+                  "where aborts overlap request lifetimes. Abort rate tracks request duration,\n"
+                  "not barge-in behaving differently by arm -- see docs/decisions.md)",
+                  fontsize=11)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
