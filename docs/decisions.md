@@ -574,6 +574,109 @@ either right now.
 stops there) into a file committed alongside its `results/*.json`, so
 this check has something to diff against and stops being one-sided.
 
+## H200 environment rebuild: forced down to vLLM 0.19.1, not 0.26.0
+
+**Found:** `pip install vllm` on the new pod (see the hardware-change
+entry) resolves `vllm==0.26.0` with `torch==2.11.0+cu130` by default --
+same as the H100 pod got. On the H100 that worked, because its driver
+(`580.126.09`) supports CUDA 13. This pod's driver is `570.124.06`,
+which `nvidia-smi` itself reports as capping out at `CUDA Version: 12.8`.
+Starting the server failed immediately: `RuntimeError: The NVIDIA
+driver on your system is too old (found version 12080)` -- torch's own
+CUDA init refusing to run a CUDA-13-compiled runtime on a driver that
+only certifies CUDA 12.8.
+**Rejected:** forcing `torch==2.11.0+cu128` in afterward (works on its
+own -- `torch.cuda.is_available()` returns `True`) while keeping
+`vllm==0.26.0`. This does not fix it: vLLM's own compiled extension
+(`vllm._C_stable_libtorch`) fails to import with `ImportError:
+libcudart.so.13: cannot open shared object file`, regardless of what
+torch build sits next to it. Checked PyPI directly (`pypi.org/pypi/
+vllm/0.26.0/json`): there is exactly one Linux wheel per vLLM release,
+no CUDA-version-specific variants the way torch has -- unlike torch,
+picking a different index doesn't change which CUDA toolkit vLLM's own
+binary was compiled against. Confirmed the same failure on
+`vllm==0.25.1` paired with a matching cu128 torch -- its compiled
+extension is also CUDA-13-linked, so this isn't specific to 0.26.0.
+**Rejected:** trying to work around the missing library (it's still on
+disk, provided by a separately-installed `nvidia-cu13` package, just
+off vLLM's runtime search path after swapping torch) by re-exposing it
+via `LD_LIBRARY_PATH`. Getting past the import would very likely just
+move the failure to an actual CUDA driver-API call at request time,
+probably a more confusing error -- CUDA 13.0's minimum driver
+requirement is genuinely higher than this pod's 570-series driver
+provides (NVIDIA's own compatibility table, not a vLLM-side check), so
+there's no real fix here short of the driver itself changing, which is
+outside what's controllable from inside the pod's container.
+**Chose:** find the newest vLLM release still built against CUDA 12.x
+and install that instead. Checked (cheaply, against PyPI's per-file
+`.metadata` endpoint, no pod time spent) each release's declared
+`torch==` pin going backward from 0.26.0: 0.22.1 through 0.26.0 all pin
+`torch==2.11.0`; **0.19.1 (released 2026-04-18, three months before
+0.26.0) is the newest release pinning `torch==2.10.0`.** Separately
+confirmed torch's own default PyPI wheel is the actual version boundary
+that matters: torch 2.8.0/2.9.0/2.9.1/2.10.0 all declare
+`nvidia-cuda-runtime-cu12==12.8.90`; **2.11.0 is the first version whose
+default wheel switched to `nvidia-cudnn-cu13`** -- i.e. this is a
+PyTorch-level CUDA-13 cutover at 2.11.0, and vLLM inherited it at 0.20.0
+by bumping its own torch pin. Installed `vllm==0.19.1` cleanly (no extra
+index needed -- it naturally resolves `torch==2.10.0+cu128`) and
+confirmed the server actually starts, loads the model, and serves a
+request (`GET /v1/models` -> `200`) for all three arms:
+fp16 (`Qwen/Qwen2.5-1.5B-Instruct`), FP8 (`--quantization fp8`), and AWQ
+(`Qwen/Qwen2.5-1.5B-Instruct-AWQ`).
+**Why it matters:** this is a seven-minor-version downgrade from the
+H100 run's vLLM, forced by hardware/driver mismatch, not chosen for any
+other reason. It has real downstream consequences, each checked
+directly rather than assumed:
+- **Attention backend changed.** H100 (vLLM 0.26.0) used
+  `flashinfer-python==0.6.14`. H200 (vLLM 0.19.1) selects
+  `FLASH_ATTN` (FlashAttention v3) instead: `Using FLASH_ATTN attention
+  backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER',
+  'TRITON_ATTN', 'FLEX_ATTENTION']`. `flashinfer-python` is still
+  installed (`0.6.6`, an older version than the H100's `0.6.14`) but
+  isn't the one vLLM picked here.
+- **The FP8 flag changed, as `docs/decisions.md`'s own FP8-flag entry
+  above predicted it might.** `--quantization fp8_per_tensor` (the H100
+  flag) is not confirmed to exist in 0.19.1 -- `fp8_per_tensor` /
+  `fp8_per_channel` / `fp8_per_block` don't appear in
+  `vllm.model_executor.layers.quantization.QUANTIZATION_METHODS` for
+  this version, but plain `'fp8'` does. `--quantization fp8` loads and
+  serves successfully, selecting `CutlassFP8ScaledMMLinearKernel` for
+  `Fp8OnlineLinearMethod` -- a different kernel path than the H100 arm.
+  **Not yet verified:** whether this `fp8` method on 0.19.1 is
+  weight-only/static-scale like the H100's `fp8_per_tensor` was, or a
+  different recipe (calibrated W8A8, dynamic scale). That needs the same
+  engine-log-reading investigation the original FP8-flag entry did
+  before this FP8 arm can be trusted the way the H100's was --
+  deliberately deferred to when the FP8 arm is actually run, not
+  assumed here.
+- **AWQ loads successfully**, auto-selecting `awq_marlin` ->
+  `MacheteLinearKernel`. No H100-side record of which kernel it selected
+  there, so this can't be directly compared yet, but it's now on record
+  for whenever that comparison matters.
+- **KV cache reporting is still capturable, which is good news for
+  issue #19.** The startup log carries `Available KV cache memory:
+  120.53 GiB` and `GPU KV cache size: 4,513,888 tokens` for the fp16
+  arm at `--gpu-memory-utilization 0.9` -- format differs slightly from
+  whatever 0.26.0 would have printed (untested, since 0.26.0 never got
+  past CUDA init on this pod), but the substance issue #19 asked for is
+  confirmed present in 0.19.1's log too.
+- **`/version` and `/metrics`' `vllm:kv_cache_usage_perc` are unchanged**
+  -- `bench/provenance.py` and `scripts/sweep.sh`'s `confirm_cache_cold`
+  should work against this version without modification.
+- `max_model_len` still resolves to `32768` (matches
+  `scripts/kv_cache_check.py`'s assumption).
+**Also found, unrelated to the CUDA mismatch:** this pod's base image
+enforces PEP 668 (`externally-managed-environment`) where the H100
+pod's apparently didn't (or the difference went unrecorded) --
+`pip install vllm` needs `--break-system-packages` here.
+**How to apply:** any Phase 3 re-run design has to route through vLLM
+0.19.1's actual behavior, not assume 0.26.0's carries over. The FP8
+weight/activation semantics specifically need re-confirming (same
+method the original FP8-flag entry used: read the engine's own
+`quantization_config` log line) before the FP8 arm's numbers can be
+interpreted the way the H100 FP8 arm's were.
+
 ## Abort-window count spread by arm: exposure, not a different mechanism (Phase 5)
 
 **Found:** `plots/itl_abort_windows.png` (concurrency ~= 32, barge-in
