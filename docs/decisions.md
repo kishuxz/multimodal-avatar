@@ -537,3 +537,39 @@ loosening of the "small and boring" default from Phase 0.
 **How to apply:** the next dependency still needs its own sign-off and
 its own entry here, same as this one -- matplotlib landing doesn't
 make future additions the default.
+
+## KV cache arithmetic check: no committed value to check it against (Phase 5)
+
+**Found:** `scripts/kv_cache_check.py` computes the expected KV cache
+footprint from Qwen2.5-1.5B-Instruct's own config -- 28 layers x 2 KV
+heads x 128 head_dim x 2 (K/V) x 2 bytes (bf16) = 28,672 bytes/token
+(28.0 KiB/token exactly), 939,524,096 bytes (~0.94 GB) for one sequence
+at the model's full 32,768-token context. That figure is an upper bound
+on a fully-extended sequence, not a steady-state prediction: vLLM's
+paged allocator reserves blocks per token actually generated, not per
+maximum possible length, and every request in the Phase 3 sweep ran
+`max_tokens=80` -- nowhere near 32,768.
+**The check itself couldn't run as originally scoped:** the plan was to
+compare this expected figure against what vLLM reported during the
+Phase 3 sweep. Nothing in this repo has that number. `scripts/sweep.sh`
+only ever polls `/metrics` for `vllm:kv_cache_usage_perc` (a percentage,
+to confirm a cold cache before each run) -- never an absolute block or
+byte count -- and the server's full startup log, where vLLM's own
+`GPU KV cache size:` line actually lives, is written to
+`/workspace/vllm_sweep_${label}.log` on the pod and never copied into
+`results/`. `*.log` is also `.gitignore`'d. So there was never a
+ground-truth figure committed to check the arithmetic against, on
+either the sanity run or the full sweep.
+**Why it matters:** this is a gap in what the harness captures, not a
+disagreement in the numbers -- worth knowing before an interview either
+way, and arguably more useful than a clean match would have been, since
+a clean match wouldn't have surfaced that the sweep's own provenance is
+incomplete. Filed as issue #19 (`measurement`) rather than fixed here,
+scoped to the whole server startup log -- it carries the resolved
+max-model-length, block size, scheduler settings, and attention backend
+selection, not just the KV cache line, and none of that is captured
+either right now.
+**How to apply:** the next real GPU run should capture that log
+(`scripts/sweep.sh` currently `tee`s it to the pod's local disk and
+stops there) into a file committed alongside its `results/*.json`, so
+this check has something to diff against and stops being one-sided.
