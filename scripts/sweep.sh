@@ -93,8 +93,11 @@ start_server() {
 
     log "starting server: label=$label model=$model extra_flags=[$*]"
     local logfile="/workspace/vllm_sweep_${label}.log"
+    # HF_HOME is set explicitly here rather than relied on from ~/.bashrc --
+    # whether tmux's shell sources it depends on login-shell behavior this
+    # script shouldn't have to assume.
     tmux new-session -d -s "$TMUX_SESSION" \
-        "cd $REPO_ROOT && vllm serve $model --host 0.0.0.0 --port 8000 --gpu-memory-utilization $GPU_MEM_UTIL $* 2>&1 | tee $logfile"
+        "cd $REPO_ROOT && HF_HOME=/workspace/hf vllm serve $model --host 0.0.0.0 --port 8000 --gpu-memory-utilization $GPU_MEM_UTIL $* 2>&1 | tee $logfile"
 
     if ! wait_for_server_ready 300; then
         echo "[sweep] server did not become ready within 300s (label=$label) -- see $logfile" >&2
@@ -124,10 +127,15 @@ run_calibration() {
 
 derived_rate() {
     # derived_rate <calibration_json> <target_concurrency>
+    # calibrate.py parses --target-concurrency with type=float, so its
+    # derived_rates_req_per_s keys are "1.0"/"8.0"/"32.0", not "1"/"8"/"32"
+    # -- coerce through float() on both sides rather than assume the bash
+    # array's plain-integer strings match the JSON's key formatting.
     python3 -c "
 import json
 d = json.load(open('$1'))
-print(d['derived_rates_req_per_s']['$2'])
+key = str(float('$2'))
+print(d['derived_rates_req_per_s'][key])
 "
 }
 
