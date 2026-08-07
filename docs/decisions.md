@@ -62,16 +62,25 @@ go public tomorrow.
 
 ## Pre-push attribution guard
 
-**Chose:** a local `pre-push` hook that rejects any push whose commit
-messages (subject + body, across the whole range being pushed) match
-`claude|anthropic|co-authored-by: claude|generated with|🤖`,
-case-insensitive.
+**Chose:** a local `pre-push` hook that rejects a push if, across the
+whole range being pushed, any commit's message (subject + body) matches
+`claude|anthropic|co-authored-by: claude|generated with|🤖`
+case-insensitive, **or** any commit's author/committer email isn't the
+`135404520+kishuxz@users.noreply.github.com` identity.
 **Rejected:** relying on remembering to run the manual `git log | grep`
-check before every push.
+check before every push. Also rejected: checking only the commit
+message. The identity check was added after a squash-merge done through
+the GitHub web UI, while logged into a different account, produced a
+commit authored by that account's real work email — a message-only
+check would never have caught this, since nothing in the message was
+wrong.
 **Why:** the manual check already got skipped once — a PR merged with an
 AI co-author trailer before this repo was recreated, which is the reason
 it needed recreating at all. A hook that runs automatically doesn't
-depend on remembering.
+depend on remembering. The identity half exists because local git
+config only governs commits made locally; it has no effect on who
+GitHub credits when a PR is merged through the browser under a
+different logged-in account.
 **How to apply:** hooks live under `.git/hooks` and are not versioned by
 git, so this file (or a copy of it) does not travel with a fresh clone —
 it has to be installed by hand. In a normal (non-worktree) clone, drop
@@ -79,8 +88,12 @@ the script at `.git/hooks/pre-push` and `chmod +x` it. In a repo checked
 out via `git worktree`, hooks are shared across every worktree of that
 repo by default (they live in the common `.git` directory, not per
 worktree), so installing it once covers all worktrees — confirm with
-`git rev-parse --git-path hooks` from each worktree if in doubt.
+`git rev-parse --git-path hooks` from each worktree if in doubt. The
+hook only catches local pushes -- it cannot stop a bad identity from a
+browser-driven merge, so the account logged into GitHub's web UI still
+has to be the right one.
 Verified by attempting a push with a deliberately bad commit message on
-a throwaway branch: rejected, nothing reached the remote. A follow-up
-push with a clean message on the same branch succeeded, confirming the
-hook isn't over-matching.
+a throwaway branch (rejected, nothing reached the remote; a follow-up
+push with a clean message succeeded), and separately by attempting a
+push with a correct message but the wrong author/committer identity
+(also rejected).
