@@ -1990,3 +1990,174 @@ single hypothesis cleanly favored -- that gets reported as "can't
 distinguish with this tooling," with a stated design for what would
 resolve it (most directly: `ncu` access on a pod where profiling
 counters aren't restricted), not stretched into a preferred story.
+
+### Results
+
+Two full profiling passes were run per arm: `torch_profiler_with_stack
+true` (vLLM's default, `_harness.json`/`.json`) and `false`
+(`_harness_v2.json`/`_v2.json`), because the first pass showed the
+profiler itself disrupting request-level scheduling badly enough to
+need a check for whether the kernel-level signal survived it. It does
+-- see "profiler-induced disruption" below -- so both passes are used
+for the kernel-category numbers and the `with_stack false` pass is
+treated as the cleaner of the two.
+
+**Kernel category share, both arms (`with_stack false`, the cleaner
+run):**
+
+| category | fp16 | AWQ |
+|---|---|---|
+| gemm | 58.9% | 71.8% |
+| attention | 11.8% | 10.2% |
+| norm_activation | 10.7% | 2.3% |
+| other | 11.1% | 9.6% |
+| sampling_sort | 5.6% | 4.5% |
+| kv_cache | 2.0% | 1.7% |
+
+The `with_stack true` pass, run under much heavier disruption (see
+below), gives 57.8%/74.0% -- close enough to the cleaner run's
+58.9%/71.8% that the category-level split looks like a real property
+of the two kernel paths, not an artifact of how badly each run was
+disrupted.
+
+**This is the opposite of what the bandwidth hypothesis, read naively,
+predicts.** If AWQ's advantage were "GEMMs move 1.91x less data and
+therefore run proportionally faster," the natural expectation is
+AWQ's GEMM kernels taking *less* of the decode window, not more --
+freed-up time should show up as a smaller GEMM share, not a larger
+one. Instead AWQ's GEMM share is ~13 points *higher* than fp16's.
+The likely mechanism: Machete's int4 GEMM kernels are individually
+slower per call than the bf16/cutlass path they replace (int4
+unpacking and per-group dequant happen inside the kernel, on top of
+the matmul itself), so AWQ spends *more* wall-clock time inside GEMM
+kernels even though those kernels move fewer bytes from HBM. The two
+largest AWQ kernels in the trace are both Machete `GemmUniversal`
+instantiations, 32.5% and 30.1% of total CUDA time on their own
+(2,464 and 7,392 calls) -- together larger than fp16's *entire* GEMM
+category. Norm/activation dropping from 10.7% to 2.3% is consistent
+with this too: AWQ fuses the SiLU/mul epilogue into the GEMM kernel
+itself (`triton_poi_fused_machete_mm_mul_silu_slice_1`, 4.6% of AWQ's
+total, has no fp16 counterpart in the top-kernel list) rather than
+running it as a separate elementwise kernel afterward -- work that
+used to show up in `norm_activation` now shows up inside `gemm`'s
+share instead. Some of AWQ's larger GEMM share is fused-in activation
+work, not purely GEMM getting slower, but that doesn't change the
+direction of the finding: **AWQ's kernel path spends more decode-window
+time in GEMM/fused-GEMM kernels than fp16's, not less.**
+
+**Profiler-induced disruption (a disclosed limitation, not swept
+under the rug):** the `with_stack true` pass caused a real breakdown
+in request-level scheduling during and after the 1.5s profiling
+window -- fp16 TTFT p99 rose to 91.9s and 27.3% of requests errored
+client-side (timeout), against a 14s nominal run duration. Disabling
+stack tracing (`with_stack false`) reduced but did not eliminate this:
+fp16 TTFT p99 fell to 12.6s, but error rate rose slightly to 33.2%;
+AWQ's TTFT p99 fell from 47.2s to 22.9s with error rate roughly flat
+(33.4% to 30.8%). **Neither pass's harness-level TTFT/ITL/error numbers
+are representative of normal c≈32 conditions and are not used as
+evidence for or against any hypothesis here** -- only the trace's
+internal kernel-category and kernel-duration numbers are, on the
+reasoning that CUDA kernel execution time is a property of the actual
+GPU work queued, largely independent of how delayed the surrounding
+request scheduling was. The category-share agreement between the two
+differently-disrupted passes (57.8/74.0 vs 58.9/71.8) supports that
+reasoning but doesn't fully substitute for a clean, undisrupted
+capture, which this tooling can't produce under real load.
+
+**ITL-vs-TTFT split (already-committed data, cited in the
+pre-registration above) still stands as the most important framing
+fact:** the clean, repeat-validated 21.6% effect is in TTFT, not ITL
+(0.298ms / 4.85% ITL delta, inside fp16's own 0.876ms noise band).
+The kernel-category numbers above describe where decode-window CUDA
+time goes, not where the TTFT effect comes from -- and given AWQ's
+GEMM share is *higher*, not lower, they argue against decode-phase
+bandwidth relief being the TTFT story's mechanism, consistent with
+the ITL split already pointing the same way before any profiling ran.
+
+**Realized concurrency (already-committed request timestamps,
+`scripts/realized_concurrency.py` against the 5-seed repeat-validation
+runs, undisrupted by any profiler):** fp16 mean 76.47 ± 6.67 in-flight
+requests (max 156 across 5 files), AWQ mean 63.92 ± 1.12 (max 107).
+Both arms are calibrated to the same nominal c≈32 target rate via
+Little's Law from each arm's own unqueued service time -- the realized
+averages sitting well above 32 for both, and AWQ's sitting **~16%
+lower than fp16's at the same nominal target**, means AWQ is queueing
+less under the same offered load. That's consistent with the
+scheduling hypothesis in one specific sense (AWQ's arm behaves as
+though it has more effective headroom), but it's also consistent with
+AWQ simply completing requests faster for any reason at all (bandwidth
+or kernel-level) -- lower realized concurrency at fixed arrival rate
+is what faster service time on either hypothesis mechanically
+produces, so this datapoint doesn't distinguish between the three
+explanations on its own. It's evidence that admission/queueing does
+differ between arms, not evidence for *why*.
+
+**KV-cache size (+1.46%, cited in the pre-registration) and the
+analytical roofline floor (fp16 0.643ms/AWQ 0.336ms vs measured ITL
+~6.14ms/~5.84ms, ~9.5x over floor) both stand as reported before
+running anything -- neither changes given the profiler results above.**
+
+### Verdict
+
+Stated against the three hypotheses as pre-registered, using the
+falsification criteria written down before this data existed:
+
+- **Bandwidth (hypothesis 1): weak-to-contradicted at the decode
+  level.** The falsification condition specified in the
+  pre-registration -- "AWQ's GEMM share isn't proportionally smaller"
+  -- is met, and more strongly than anticipated: AWQ's GEMM share is
+  higher, not merely un-shrunk. Combined with the ITL noise-band
+  result, decode-phase bandwidth relief is not what's producing the
+  21.6% TTFT effect. This doesn't rule out a bandwidth effect existing
+  somewhere in the request lifecycle (prefill wasn't isolated -- see
+  below), only that it isn't visible in decode-window kernel time,
+  which is where a per-token weight-streaming saving would have to
+  show up.
+- **Kernel efficiency (hypothesis 2): plausible, not confirmable with
+  this tooling.** Machete's int4 GEMMs taking a larger share of
+  decode-window time despite moving less data is consistent with
+  "different kernel, different efficiency profile" rather than a pure
+  bandwidth story -- but confirming *which* efficiency difference
+  (compute-bound int4 unpacking overhead vs. genuinely higher
+  achieved bytes/s once launch overhead is accounted for) needs
+  hardware performance counters (`ncu`) this pod's hypervisor blocks.
+  Kernel *duration* alone, without occupancy/throughput counters,
+  can't separate "slower because compute-bound" from "slower per-call
+  but the call count differs" cleanly enough to call this confirmed.
+- **Scheduling (hypothesis 3): best-supported *observable* mechanism,
+  not a root cause.** Realized concurrency is measurably lower for
+  AWQ at the same nominal rate, which is the kind of thing this
+  hypothesis predicts -- but as noted above, that observation doesn't
+  distinguish "less queueing because of freed KV-cache headroom" from
+  "less queueing because requests simply complete faster for whatever
+  reason." KV-cache size barely differs between arms (+1.46%), which
+  argues against a *large* headroom-driven admission effect
+  specifically, even though the queueing-level symptom (lower realized
+  concurrency) is real.
+
+**Overall: the README's "bandwidth-bound regime, int4 weights move 4x
+less data" framing is wrong on both counts** -- the byte ratio is
+1.91x, not 4x, and the decode-phase kernel-share evidence points away
+from bandwidth as the mechanism, not toward it. The most defensible
+statement this data supports is that **AWQ's TTFT advantage at c≈32
+is a real, repeat-validated, prefill/queueing-phase effect whose
+kernel-level mechanism this profiling pass could not pin down** --
+GEMM-kernel-share data argues against simple bandwidth relief,
+kernel-efficiency differences are plausible but need hardware counters
+this pod can't provide, and scheduling-level symptoms (lower realized
+concurrency) are real but not yet traced to a specific cause.
+
+**What this pass didn't do, stated plainly rather than left implicit:**
+`record_shapes` wasn't enabled, so prefill-shaped GEMM calls (large
+batch varying by admitted request, long sequence length) can't be
+distinguished from decode-shaped calls (batch~32, single token) in the
+captured trace -- the category/kernel-share numbers above are an
+aggregate over the whole profiling window, prefill and decode mixed
+together, not a prefill-isolated measurement. Given the TTFT-not-ITL
+split already says the effect is concentrated somewhere other than
+steady-state decode, prefill-phase-specific profiling (`record_shapes
+true`, or bucketing captured kernels by call-adjacent request-admission
+events) is the next experiment this finding points at, not a repeat of
+this one. Hardware counter access (`ncu`, on a pod without the
+hypervisor restriction hit here) would resolve the kernel-efficiency
+question directly rather than needing a workaround.
