@@ -1,4 +1,4 @@
-.PHONY: setup provenance sweep analyze analyze-h200 kv-check perplexity perplexity-slices diffusion diffusion-quality clean
+.PHONY: setup provenance sweep analyze analyze-h200 kv-check perplexity perplexity-slices diffusion diffusion-quality verify-abort clean
 
 setup:
 	pip install -r requirements.txt
@@ -63,6 +63,17 @@ diffusion-quality:
 		--reference results/h200/diffusion/quality_steps20_nocache.png \
 		--candidate results/h200/diffusion/quality_steps20_deepcache.png \
 		--out results/h200/diffusion/quality_steps20_lpips.json
+
+# One trial of abort-to-slot-free latency against an already-running
+# server (issue #1). Not part of any sweep -- a standalone diagnostic,
+# re-run whenever an arm/environment change could plausibly affect abort
+# behavior, per docs/decisions.md's own "re-verify, don't assume" rule.
+# The H200 numbers in this repo came from 5 invocations of this target
+# with --out results/h200/verify_abort_trial{0..4}.json.
+verify-abort:
+	python3 scripts/verify_abort.py --base-url http://localhost:8000 \
+		--model Qwen/Qwen2.5-1.5B-Instruct --max-tokens 512 \
+		--abort-after-tokens 10 --out results/verify_abort.json
 
 clean:
 	find . -name '__pycache__' -type d -exec rm -rf {} +
