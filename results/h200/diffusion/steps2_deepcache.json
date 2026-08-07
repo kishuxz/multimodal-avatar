@@ -1,0 +1,133 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T22:10:36.127041+00:00",
+    "git_sha": null,
+    "git_dirty": null,
+    "git_sha_source": null,
+    "gpu": {
+      "name": "NVIDIA H200",
+      "driver_version": "570.124.06",
+      "driver_max_cuda_version": "12.8"
+    },
+    "vllm_version": "0.19.1",
+    "vllm_docker_image": null,
+    "model": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--steps",
+      "2",
+      "--repeats",
+      "5",
+      "--deep-cache",
+      "--cache-interval",
+      "5",
+      "--cache-branch",
+      "0",
+      "--out",
+      "results/h200/diffusion/steps2_deepcache.json"
+    ],
+    "extra": {
+      "script": "diffusion_bench.py",
+      "scheduler": "DPMSolverMultistepScheduler",
+      "steps": 2,
+      "height": 512,
+      "width": 512,
+      "guidance_scale": 7.5,
+      "dtype": "float16",
+      "deep_cache": true,
+      "cache_interval": 5,
+      "cache_branch": 0,
+      "warmup_runs": 1
+    }
+  },
+  "config": {
+    "steps": 2,
+    "height": 512,
+    "width": 512,
+    "repeats": 5,
+    "seed_start": 0,
+    "deep_cache": true,
+    "cache_interval": 5,
+    "cache_branch": 0,
+    "save_image": null,
+    "out": "results/h200/diffusion/steps2_deepcache.json"
+  },
+  "stats": {
+    "cond_s": {
+      "mean": 0.006681454926729202,
+      "stdev": 0.0001236808492002198
+    },
+    "step_mean_s": {
+      "mean": 0.010860873758792878,
+      "stdev": 0.0002526454923599715
+    },
+    "vae_s": {
+      "mean": 0.02100394293665886,
+      "stdev": 2.760524846388739e-05
+    },
+    "total_s": {
+      "mean": 0.049407145380973815,
+      "stdev": 0.0006239507766942466,
+      "min": 0.0489271879196167,
+      "max": 0.05032089725136757
+    }
+  },
+  "per_repeat": [
+    {
+      "seed": 0,
+      "cond_s": 0.006836500018835068,
+      "step_s": [
+        0.020420148968696594,
+        0.002070888876914978
+      ],
+      "step_mean_s": 0.011245518922805786,
+      "vae_s": 0.02099335938692093,
+      "total_s": 0.05032089725136757
+    },
+    {
+      "seed": 1,
+      "cond_s": 0.0067911893129348755,
+      "step_s": [
+        0.01988305151462555,
+        0.0020998679101467133
+      ],
+      "step_mean_s": 0.010991459712386131,
+      "vae_s": 0.021021869033575058,
+      "total_s": 0.049795977771282196
+    },
+    {
+      "seed": 2,
+      "cond_s": 0.006563425064086914,
+      "step_s": [
+        0.019372008740901947,
+        0.002065364271402359
+      ],
+      "step_mean_s": 0.010718686506152153,
+      "vae_s": 0.020960330963134766,
+      "total_s": 0.048961129039525986
+    },
+    {
+      "seed": 3,
+      "cond_s": 0.006593789905309677,
+      "step_s": [
+        0.019261479377746582,
+        0.002055089920759201
+      ],
+      "step_mean_s": 0.010658284649252892,
+      "vae_s": 0.02101682871580124,
+      "total_s": 0.0489271879196167
+    },
+    {
+      "seed": 4,
+      "cond_s": 0.006622370332479477,
+      "step_s": [
+        0.019311964511871338,
+        0.00206887349486351
+      ],
+      "step_mean_s": 0.010690419003367424,
+      "vae_s": 0.021027326583862305,
+      "total_s": 0.04903053492307663
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T22:13:17.028156+00:00",
+    "git_sha": null,
+    "git_dirty": null,
+    "git_sha_source": null,
+    "gpu": {
+      "name": "NVIDIA H200",
+      "driver_version": "570.124.06",
+      "driver_max_cuda_version": "12.8"
+    },
+    "vllm_version": "0.19.1",
+    "vllm_docker_image": null,
+    "model": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--steps",
+      "20",
+      "--repeats",
+      "1",
+      "--seed-start",
+      "0",
+      "--out",
+      "results/h200/diffusion/quality_steps20_nocache.json",
+      "--save-image",
+      "results/h200/diffusion/quality_steps20_nocache.png"
+    ],
+    "extra": {
+      "script": "diffusion_bench.py",
+      "scheduler": "DPMSolverMultistepScheduler",
+      "steps": 20,
+      "height": 512,
+      "width": 512,
+      "guidance_scale": 7.5,
+      "dtype": "float16",
+      "deep_cache": false,
+      "cache_interval": null,
+      "cache_branch": null,
+      "warmup_runs": 1
+    }
+  },
+  "config": {
+    "steps": 20,
+    "height": 512,
+    "width": 512,
+    "repeats": 1,
+    "seed_start": 0,
+    "deep_cache": false,
+    "cache_interval": 5,
+    "cache_branch": 0,
+    "save_image": "results/h200/diffusion/quality_steps20_nocache.png",
+    "out": "results/h200/diffusion/quality_steps20_nocache.json"
+  },
+  "stats": {
+    "cond_s": {
+      "mean": 0.00703192874789238,
+      "stdev": null
+    },
+    "step_mean_s": {
+      "mean": 0.0189043078571558,
+      "stdev": null
+    },
+    "vae_s": {
+      "mean": 0.021055664867162704,
+      "stdev": null
+    },
+    "total_s": {
+      "mean": 0.4061737507581711,
+      "stdev": null,
+      "min": 0.4061737507581711,
+      "max": 0.4061737507581711
+    }
+  },
+  "per_repeat": [
+    {
+      "seed": 0,
+      "cond_s": 0.00703192874789238,
+      "step_s": [
+        0.019419625401496887,
+        0.01887253299355507,
+        0.01878584921360016,
+        0.018841926008462906,
+        0.018837235867977142,
+        0.018738485872745514,
+        0.018872100859880447,
+        0.018871046602725983,
+        0.018914535641670227,
+        0.018806204199790955,
+        0.01882823184132576,
+        0.018990475684404373,
+        0.01897616684436798,
+        0.019022300839424133,
+        0.01886316016316414,
+        0.018808498978614807,
+        0.018962625414133072,
+        0.018964167684316635,
+        0.018904585391283035,
+        0.018806401640176773
+      ],
+      "step_mean_s": 0.0189043078571558,
+      "vae_s": 0.021055664867162704,
+      "total_s": 0.4061737507581711
+    }
+  ]
+}

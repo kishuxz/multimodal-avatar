@@ -1,0 +1,123 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T22:10:05.350605+00:00",
+    "git_sha": null,
+    "git_dirty": null,
+    "git_sha_source": null,
+    "gpu": {
+      "name": "NVIDIA H200",
+      "driver_version": "570.124.06",
+      "driver_max_cuda_version": "12.8"
+    },
+    "vllm_version": "0.19.1",
+    "vllm_docker_image": null,
+    "model": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--steps",
+      "1",
+      "--repeats",
+      "5",
+      "--out",
+      "results/h200/diffusion/steps1.json"
+    ],
+    "extra": {
+      "script": "diffusion_bench.py",
+      "scheduler": "DPMSolverMultistepScheduler",
+      "steps": 1,
+      "height": 512,
+      "width": 512,
+      "guidance_scale": 7.5,
+      "dtype": "float16",
+      "deep_cache": false,
+      "cache_interval": null,
+      "cache_branch": null,
+      "warmup_runs": 1
+    }
+  },
+  "config": {
+    "steps": 1,
+    "height": 512,
+    "width": 512,
+    "repeats": 5,
+    "seed_start": 0,
+    "deep_cache": false,
+    "cache_interval": 5,
+    "cache_branch": 0,
+    "save_image": null,
+    "out": "results/h200/diffusion/steps1.json"
+  },
+  "stats": {
+    "cond_s": {
+      "mean": 0.006610744446516037,
+      "stdev": 0.00037895000784011774
+    },
+    "step_mean_s": {
+      "mean": 0.018737760186195374,
+      "stdev": 0.0004319148374349266
+    },
+    "vae_s": {
+      "mean": 0.020982063561677932,
+      "stdev": 1.523984148231916e-05
+    },
+    "total_s": {
+      "mean": 0.04633056819438934,
+      "stdev": 0.0008169594778753455,
+      "min": 0.045829273760318756,
+      "max": 0.0477728433907032
+    }
+  },
+  "per_repeat": [
+    {
+      "seed": 0,
+      "cond_s": 0.007285423576831818,
+      "step_s": [
+        0.019485630095005035
+      ],
+      "step_mean_s": 0.019485630095005035,
+      "vae_s": 0.02100178971886635,
+      "total_s": 0.0477728433907032
+    },
+    {
+      "seed": 1,
+      "cond_s": 0.006447724997997284,
+      "step_s": [
+        0.018734540790319443
+      ],
+      "step_mean_s": 0.018734540790319443,
+      "vae_s": 0.02099423110485077,
+      "total_s": 0.046176496893167496
+    },
+    {
+      "seed": 2,
+      "cond_s": 0.00640970841050148,
+      "step_s": [
+        0.01850515604019165
+      ],
+      "step_mean_s": 0.01850515604019165,
+      "vae_s": 0.02097282186150551,
+      "total_s": 0.04588768631219864
+    },
+    {
+      "seed": 3,
+      "cond_s": 0.006410788744688034,
+      "step_s": [
+        0.01845274120569229
+      ],
+      "step_mean_s": 0.01845274120569229,
+      "vae_s": 0.02096574380993843,
+      "total_s": 0.045829273760318756
+    },
+    {
+      "seed": 4,
+      "cond_s": 0.006500076502561569,
+      "step_s": [
+        0.018510732799768448
+      ],
+      "step_mean_s": 0.018510732799768448,
+      "vae_s": 0.020975731313228607,
+      "total_s": 0.045986540615558624
+    }
+  ]
+}
