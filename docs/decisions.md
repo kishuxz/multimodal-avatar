@@ -1347,3 +1347,67 @@ FP8 is excluded from this measurement, same as every other H200 table --
 issue #29's corrupted output means there is no coherent text to measure
 the perplexity of; a PPL number from it would describe confidence in
 token soup, not quality.
+
+## Phase 4 perplexity results: the noise band is zero, and AWQ's cost is real
+
+`results/h200/perplexity_fp16.json`, `results/h200/perplexity_awq.json` --
+5 repeats each, fresh server per arm, fixed 8192-token wikitext-2 slice,
+forced-decoding (`scripts/perplexity.py`).
+
+**The noise band came back exactly zero.** Every one of the 5 repeats, for
+both arms, returned bit-identical NLL and perplexity (stdev 0.0 in both
+`stats.perplexity.stdev` and `stats.nll.stdev`). Not "small" -- exactly
+zero, to the full precision Python's float printed. This wasn't the
+expected outcome going in (see the measurement-design entry above: "an
+empirical question... not something to assume either way"), but it makes
+sense in hindsight -- a single unbatched sequence against an otherwise-idle
+server takes the same kernel path every time, with no other concurrent
+requests around to change batch composition and perturb reduction order the
+way continuous batching does under the load sweep. **This means: any
+nonzero fp16/AWQ delta here is definitionally real, not something that
+needs a stdev comparison to trust.** That's a stronger position than the
+latency numbers ever got to, and it's specific to this measurement's own
+conditions (single sequence, idle server) -- it does not imply the load
+sweep's latency noise bands should have been zero too; queueing, batching,
+and scheduling variance are real there in a way they aren't here.
+
+**fp16: PPL 9.7118 (NLL 2.2733, mean rank of the actual token 58.1).
+AWQ: PPL 10.5145 (NLL 2.3527, mean rank 62.3).** AWQ's perplexity is 8.26%
+higher (relative) than fp16's -- a real, not-noise difference, in the
+predicted direction.
+
+**Against the pre-registered prediction:** predicted "a few percent,"
+landed at 8.26%. Direction right, order of magnitude right, but on the
+high side of "a few" -- not the "no measurable difference" surprise, not
+the "tens of percent, possibly broken" surprise either, so no
+sample-completions check was triggered the way it would have been at
+either extreme. Worth being precise rather than rounding this down to fit
+the prediction better after the fact: 8.26% is closer to "one-in-twelve
+tokens' worth of extra surprise" than to a marginal cost.
+
+**Paired with the latency finding this was measured to complete
+(docs/decisions.md, "H200 sweep results," and the README's AWQ section):**
+AWQ trades an 8.26% real perplexity increase for a 21.6% TTFT p50 win at
+c~=32 (both repeat-validated, both real). At low load (c~=1), AWQ pays the
+same 8.26% perplexity cost *and* a 14.5% latency penalty -- worse on both
+axes, not a trade at all. The quality cost is the same at every load level
+(it's a property of the weights, not the batch), but whether it buys
+anything back in latency depends entirely on load. **The honest one-line
+version: AWQ is a bad idea at low load (slower and worse) and a real,
+quantifiable trade at high load (worse output, meaningfully faster) --
+never a free win at either end.**
+
+**Limitation, repeated from the measurement-design entry because it
+matters most right here, at the point this number gets used to argue
+something:** this is wikitext-2 next-token perplexity, encyclopedic prose,
+not this project's actual multi-turn conversational workload. An 8.26%
+PPL increase says AWQ's weights carry real, measurable representational
+error relative to fp16 -- it does not say how a human rating this avatar's
+actual responses for coherence or helpfulness would perceive that error,
+which could be smaller (short conversational replies may not expose the
+kind of long-range prediction fp16 does better) or larger (a single bad
+word choice is more noticeable in a four-sentence reply than averaged into
+an 8192-token encyclopedia excerpt) than this number implies either way.
+Reported as what it is -- a real, repeatable signal that AWQ costs
+something on a standard proxy metric -- not as a validated statement about
+conversational quality.
