@@ -161,3 +161,56 @@ repo's short history -- verify the resulting merge commit's raw
 `commit.author`/`commit.committer` immediately after every merge
 (`gh api repos/.../commits --jq '.[0].commit'`), not the GitHub-resolved
 `.author.login`, since that field is what actually lands in git history.
+
+## Provenance wired into harness.py (issue #15)
+
+**Chose:** `harness.py`'s `main()` calls `bench.provenance.capture()` and
+writes the result as a `provenance` key in every output JSON, before
+`config`/`summary`/`requests`.
+**Why:** the helper existed since Phase 0 but nothing called it -- every
+result written so far, including the Phase 1 sanity run, had zero
+provenance. That's a direct violation of this repo's own first rule.
+**Found while wiring it up:** `cfg.base_url` is `http://host:port/v1`
+(the OpenAI API prefix), but vLLM's `/version` endpoint lives at the
+server root. Passing `cfg.base_url` straight through would 404 and
+silently fall back to a local `import vllm` -- defeating the documented
+"ask the server, not the local install" design. Fixed by stripping the
+path before calling `capture()`.
+
+**Chose:** `bench/provenance.py` tries local git first (`git rev-parse
+HEAD`); only if that fails does it read `PROVENANCE_GIT_SHA` /
+`PROVENANCE_GIT_DIRTY` from the environment, and it always records which
+source won as `git_sha_source`.
+**Rejected:** trusting the env vars unconditionally, or leaving the SHA
+null when `.git` is absent.
+**Why:** `git archive` (how code gets onto the pod -- see the pod
+environment entry above) strips `.git` entirely, so the pod can never
+self-report a SHA. But a null SHA silently defeats the point of
+provenance just as much as a wrong one would. The fix ships the SHA from
+the machine that actually did the transfer (`git rev-parse HEAD` +
+dirty-check, run locally, passed as env vars) and has the helper prefer
+live local git whenever it's available -- so a real clone or a future
+git-based deploy still self-reports correctly, and only the tree-export
+case falls back to the shipped value. The source is always recorded
+because a wrong SHA is worse than a null one: null is an obvious gap,
+a stale or mismatched SHA looks trustworthy and isn't.
+
+## deep_gemm import failure on the pod (non-fatal, flagged for later)
+
+**Found:** at fp16 server startup, vLLM logs a caught, non-fatal warning:
+`Module vllm.third_party.deep_gemm was found but failed to import` --
+`ImportError: libnvrtc.so.13: cannot open shared object file: No such
+file or directory`. The server starts and serves requests normally.
+**Why it matters:** `deep_gemm` is a GEMM kernel library vLLM can use for
+certain quantized/grouped matmul paths. It not being available doesn't
+block fp16, but if the AWQ-Int4 or FP8 arms come back with surprising
+numbers (slower than expected, or an unexpected kernel selected), this
+is the first thing to check -- a missing accelerated kernel path would
+silently fall back to a slower one rather than error, which is exactly
+the kind of thing that would otherwise look like a real quantization
+finding and isn't.
+**Not fixed yet:** the missing library is a CUDA 13 runtime component
+(`libnvrtc.so.13`) that isn't present despite `torch.version.cuda`
+reporting `13.0` -- likely a partial/mismatched CUDA runtime install
+alongside torch's bundled one. Filed here rather than chased down now
+since it isn't blocking fp16 verification.

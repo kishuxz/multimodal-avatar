@@ -36,9 +36,12 @@ import os
 import random
 import statistics
 import time
+import urllib.parse
 from dataclasses import dataclass, field, asdict
 
 import aiohttp
+
+from bench import provenance
 
 
 # --------------------------------------------------------------------------
@@ -365,7 +368,18 @@ async def main():
         wall = time.perf_counter() - t0
 
     summary = summarize(results, cfg.warmup, wall)
+    # provenance.capture() hits GET /version, which lives at the server
+    # root -- strip the /v1 API prefix, or it 404s and silently falls back
+    # to a local `import vllm` instead of asking the server that actually
+    # ran the requests.
+    parsed_base = urllib.parse.urlsplit(cfg.base_url)
+    vllm_server_root = f"{parsed_base.scheme}://{parsed_base.netloc}"
     payload = {
+        "provenance": provenance.capture(
+            model=cfg.model,
+            vllm_server_url=vllm_server_root,
+            extra={"harness_label": cfg.label},
+        ),
         "config": vars(cfg),
         "summary": summary,
         "requests": [asdict(r) for r in results],

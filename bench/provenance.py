@@ -5,6 +5,7 @@ Rule: no result is trustworthy without knowing exactly what produced it
 the single place that knowledge lives so every script calls the same code.
 """
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -19,13 +20,27 @@ def _run(cmd):
         return None
 
 
-def _git_sha():
-    return _run(["git", "rev-parse", "HEAD"])
+def _git_identity():
+    """(sha, dirty, source). Prefers local git -- it reflects whatever is
+    actually checked out at run time. Falls back to PROVENANCE_GIT_SHA /
+    PROVENANCE_GIT_DIRTY, set by the machine that shipped the code, for the
+    case this is running from a tree with no .git (e.g. `git archive`'d
+    onto a benchmark pod). A wrong SHA is worse than a null one, so the
+    source is always recorded -- never guess silently between the two.
+    """
+    sha = _run(["git", "rev-parse", "HEAD"])
+    if sha is not None:
+        status = _run(["git", "status", "--porcelain"])
+        dirty = bool(status) if status is not None else None
+        return sha, dirty, "local-git"
 
+    env_sha = os.environ.get("PROVENANCE_GIT_SHA")
+    if env_sha:
+        env_dirty = os.environ.get("PROVENANCE_GIT_DIRTY")
+        dirty = {"true": True, "false": False}.get((env_dirty or "").lower())
+        return env_sha, dirty, "env (shipped from transfer machine)"
 
-def _git_dirty():
-    status = _run(["git", "status", "--porcelain"])
-    return bool(status) if status is not None else None
+    return None, None, None
 
 
 def _gpu_info():
@@ -91,10 +106,12 @@ def capture(
         extra: dict of anything run-specific (arm name, load params, etc.)
             that doesn't belong in the fixed schema above.
     """
+    git_sha, git_dirty, git_sha_source = _git_identity()
     return {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "git_sha": _git_sha(),
-        "git_dirty": _git_dirty(),
+        "git_sha": git_sha,
+        "git_dirty": git_dirty,
+        "git_sha_source": git_sha_source,
         "gpu": _gpu_info(),
         "vllm_version": _vllm_version(vllm_server_url),
         "vllm_docker_image": vllm_docker_image,
