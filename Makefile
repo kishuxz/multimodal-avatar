@@ -1,4 +1,4 @@
-.PHONY: setup provenance sweep analyze analyze-h200 kv-check perplexity perplexity-slices clean
+.PHONY: setup provenance sweep analyze analyze-h200 kv-check perplexity perplexity-slices diffusion diffusion-quality clean
 
 setup:
 	pip install -r requirements.txt
@@ -47,6 +47,22 @@ perplexity:
 # requirements.txt, see docs/decisions.md.
 perplexity-slices:
 	python3 scripts/build_perplexity_slices.py
+
+# Phase 6: per-frame stage timing (conditioning/step/VAE decode) across
+# step counts 1-20, with and without DeepCache, at 512x512. Requires a
+# GPU; no vLLM, no server -- just requirements-pod-diffusion.txt on top
+# of a normal CUDA/torch install.
+diffusion:
+	scripts/diffusion_sweep.sh
+
+# LPIPS distance between a DeepCache frame and the same seed/steps
+# without caching -- run after `diffusion`, once the matched-seed image
+# pairs it produces exist.
+diffusion-quality:
+	python3 scripts/diffusion_quality_check.py \
+		--reference results/h200/diffusion/quality_steps20_nocache.png \
+		--candidate results/h200/diffusion/quality_steps20_deepcache.png \
+		--out results/h200/diffusion/quality_steps20_lpips.json
 
 clean:
 	find . -name '__pycache__' -type d -exec rm -rf {} +

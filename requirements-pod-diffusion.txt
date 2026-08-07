@@ -1,0 +1,14 @@
+# Phase 6 (scripts/diffusion_bench.py, diffusion_sweep.sh,
+# diffusion_quality_check.py): the minimal set of packages installed on
+# top of the existing H200 pod environment (requirements-pod-h200.txt)
+# to run the diffusion frame-budget sweep. Not a full `pip freeze` --
+# this phase deliberately runs with vLLM's constraints out of the
+# picture (no server, no vLLM import), so it doesn't need or want
+# requirements-pod-h200.txt's CUDA-12.8/torch-2.10 pin story; it just
+# happens to share that pod's already-installed torch, which is
+# incidental, not a requirement -- see docs/decisions.md, "Phase 6
+# model choice."
+diffusers==0.39.0
+accelerate==1.14.0
+DeepCache==0.1.1
+lpips==0.1.4
