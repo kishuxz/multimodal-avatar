@@ -298,6 +298,28 @@ falsely precise point estimate.
 re-verified with this script rather than assumed to inherit this
 result -- it measures the mechanism, not a universal constant.
 
+**Re-verified on H200 (this entry's own rule, applied to itself):** the
+numbers above are from the H100 run; this project went a full seven
+sections (hardware change, vLLM downgrade, four sweep-v2 fixes) without
+actually re-running this specific check on H200, despite "any future
+arm/config that changes abort behavior gets re-verified" being the
+stated rule immediately above. Fixed during the Phase 7 audit pass, not
+assumed inherited. `results/h200/verify_abort_trial{0..4}.json` -- 5
+trials, `--max-tokens 512 --abort-after-tokens 10`, fp16, vLLM 0.19.1:
+`vllm:num_requests_running` dropped from 1 to 0 within **4.15-5.15ms**
+of the abort being issued, `cancellation_confirmed: true` and
+`ambiguous_vs_natural_completion: false` on all 5 trials. Still fast,
+still single-digit ms -- the prediction holds on H200 too. **The
+polling resolution itself differs from the H100 run** (median ~8.4ms
+here vs. ~3.1ms there, both at `--poll-interval 0.005`) -- plausibly
+network/scheduling variance between the two pods' `/metrics` round-trip
+time, not investigated further since it doesn't change the conclusion
+(the measured latency is still below the polling interval on both
+environments, so both reports are "fast, resolution-limited," not two
+different precise numbers to reconcile). `make verify-abort` wires this
+into the Makefile going forward -- previously runnable but not listed
+anywhere a reader would find it.
+
 ## Predictions, stated before measuring (Phase 3 sweep)
 
 Qwen2.5-1.5B: 28 layers, 12 query heads, 2 KV heads -- aggressive GQA
@@ -449,7 +471,18 @@ uniformly across every load point in the sweep.
 estimate that doesn't need that many samples. Checked rather than
 guessed: ran the same config (fp16, prefix off, rate=513 req/s) at
 20s and 60s. TTFT p99: 106.9ms (n=7970) vs 99.5ms (n=23831) -- about
-7% apart, judged stable enough to use the shorter duration.
+7% apart, judged stable enough to use the shorter duration. **Not
+file-backed:** this was a one-off methodology check on the H100 pod, run
+before the decision to commit every result JSON was applied this
+consistently -- the 60s run's output was never saved, and the pod is
+gone, so this specific comparison can't be reproduced or re-verified
+the way the rest of this repo's numbers can. The 20s-vs-120s tradeoff
+this check justifies is disclosed in the next paragraph regardless of
+that gap, since the decision it informed (use 20s) is still in effect
+and still worth explaining, but the 106.9ms/99.5ms figures themselves
+should be read as "reported once, not independently checkable," not as
+a number with the same evidentiary weight as everything else in this
+repo.
 **Known tradeoff, disclosed rather than hidden:** applying 20s
 *uniformly* means the low end of the matrix (concurrency~=1, roughly
 16 req/s) gets only ~300 samples in a 20s window, versus ~1900 at the
@@ -548,6 +581,23 @@ very unlikely to be noise, but it hasn't been checked the same way
 the quantization comparison now has. Worth a repeat pass before
 leaning on the exact percentages in a final write-up, even though the
 direction and rough magnitude are not in doubt.
+**Superseded by a later baseline, found during the Phase 7 audit pass,
+disclosed rather than silently reconciled:** the 45% p99 figure above
+compares two single runs -- both sides unrepeated, self-consistent at
+the time this was written. Repeats were later added for the *off* side
+of this same cell (`results/repeat_fp16_c32.json`, 5 seeds, mean
+88.58 +/- 7.31ms p99) without this section being revisited. Every
+auto-generated artifact downstream of that (`results/summary.md`,
+`plots/effect_size_comparison.png`, and the H200-section prose at
+"AWQ crosses over," below) computes the *on* side (55.06ms, still
+single-run -- prefix-caching-on was never repeat-validated on H100)
+against that 88.58ms repeat-validated mean instead, giving **-37.8%**,
+not -44.7%/45%. **-37.8%, against the repeat-validated mean, is the
+canonical figure** -- it rests on 5x more data for the baseline side
+and is what every other table in this repo already uses; this
+section's own 45% is kept above as the historical single-run-vs-
+single-run number it always was, not deleted, but is superseded, not
+canonical.
 
 **Scope of every claim above:** Qwen2.5-1.5B-Instruct, single H100
 80GB, concurrency approximately 1 and approximately 32 (not the full

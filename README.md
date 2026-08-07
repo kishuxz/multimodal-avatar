@@ -1,30 +1,49 @@
 # avatar-inference-bench
 
 A latency and quality benchmark for a real-time conversational avatar's
-two costliest components: the LLM-serving backend (vLLM-served
-Qwen2.5-1.5B-Instruct under open-loop load, across quantization arms,
-paired with a perplexity check for output quality) and the
-diffusion-based frame renderer's per-frame cost (Stable Diffusion 1.5,
-staged and timed against a 25fps/40ms real-time budget). Two separate
-environments and workloads, each scoped to its own section below --
-nothing here compares one against the other.
+two costliest components: the LLM-serving backend and the
+diffusion-based frame renderer's per-frame cost. Built to show where a
+sub-500ms real-time avatar's actual compute budget goes, and which of
+the standard optimizations (quantization, fewer denoising steps) do and
+don't help at the size and load such a system would actually run --
+not to demonstrate techniques in the abstract.
 
-**LLM serving -- the largest lever is prefix caching, not
+The LLM side is vLLM-served Qwen2.5-1.5B-Instruct under open-loop load,
+across quantization arms (AWQ int4, FP8, and unquantized fp16), paired
+with a perplexity check (a standard language-model quality metric;
+lower is better) for output quality. 1.5B is the size such a system
+would realistically serve, not an arbitrary pick -- see "Model size"
+under Methodology for why that choice also means the quantization
+findings here may not transfer to larger models. The diffusion side is
+Stable Diffusion 1.5, staged and timed against a 25fps/40ms real-time
+frame budget. Two separate environments and workloads, each scoped to
+its own section below -- nothing here compares one against the other.
+
+**LLM serving -- the largest lever is prefix caching (reusing the
+KV-cache -- a server's per-token attention memory -- across requests
+that share a prompt prefix, instead of recomputing it), not
 quantization**, several times larger than any quantization effect
-measured, repeat-validated at the load point that matters most. **AWQ
-(int4) trades an ~8% perplexity cost for a 21.6% faster TTFT p50 at high
+measured, repeat-validated at the load point that matters most --
+though this is a best-case number: the workload is 8 fixed, repeated
+conversations, exactly what prefix caching is designed to exploit, not
+a production traffic distribution (full caveat under Limitations).
+**AWQ (a 4-bit weight-quantization method) trades an ~8% perplexity
+cost for a 21.6% faster TTFT p50 (median time-to-first-token) at high
 concurrency, but is worse on both latency and quality at low
-concurrency** -- never the right choice there. **FP8 is excluded:**
-vLLM 0.19.1's online W8A8 path emits corrupted output, a serving-stack
-defect (issue #29), not a property of the technique.
+concurrency** -- never the right choice there. **FP8 (8-bit
+floating-point quantization) is excluded:** vLLM 0.19.1's online W8A8
+path emits corrupted output, a serving-stack defect (issue #29), not a
+property of the technique.
 
 **Diffusion -- the binding constraint at 512x512 is fixed cost, not
 step count:** conditioning + VAE decode alone is 27.6ms, 69% of a 40ms
 real-time frame budget, before any denoising step runs -- the field's
-usual lever (fewer steps) can't touch that. DeepCache, the one
-optimization tried, speeds up the high-step regime up to 2.82x but is
-*slower* at the step count nearest the real budget, with severe quality
-loss at both ends.
+usual lever (fewer steps) can't touch that. DeepCache (a training-free
+technique that reuses, rather than recomputes, similar intermediate
+network features across nearby denoising steps) -- the one optimization
+tried -- speeds up the high-step regime up to 2.82x but is *slower* at
+the step count nearest the real budget, with severe quality loss at
+both ends.
 
 ![Prefix caching effect](plots/h200/prefix_caching_effect.png)
 ![Effect size comparison](plots/h200/effect_size_comparison.png)
@@ -63,8 +82,11 @@ At concurrency ≈32, prefix caching on vs. off: TTFT p50 **-32.8%**, p99
 2.81ms); the on-arm side is a single run (30.62ms), so the exact
 percentage could move somewhat on a repeat pass, but the direction and
 rough magnitude are not in doubt. This matches the H100 prior run's own
-finding at the same load point (-27.8% p50 / -37.8% p99 there) -- same
-direction, comparable-to-larger magnitude on H200.
+finding at the same load point (-27.8% p50 / -37.8% p99 there, against
+the repeat-validated off-side mean -- see `docs/decisions.md`,
+"Corrected results," for the single-run-baseline figure this superseded
+and why the two differ) -- same direction, comparable-to-larger
+magnitude on H200.
 
 The H100 run's concurrency ≈1 reversal (caching on measurably *worse*)
 does not reproduce here: both arms are repeat-validated at c≈1 (off 11.29
@@ -161,10 +183,22 @@ H200 table in this document.
 
 ### 4. Barge-in lands at every load level (methodology fix, confirmed)
 
+Barge-in: a configurable fraction of requests are aborted mid-stream
+after a randomly sampled delay, simulating a user interrupting the
+avatar while it's still speaking. The harness measures whether the
+abort actually lands before the response would have finished on its
+own, and what that costs other in-flight requests sharing the server.
+
 | | c≈1 | c≈8 | c≈32 |
 |---|---|---|---|
 | H100 fp16 abort rate (fixed 0.3-1.2s window) | 0% | 0% | 0.10% |
 | H200 fp16 abort rate (window scaled to 25-75% of calibrated service time) | 25.5% | 25.4% | 25.6% |
+
+*Not a direct comparison: the two rows use different abort-window
+designs (fixed delay vs. scaled to each arm's own service time --
+that's the fix this section is about, explained below), not two
+measurements of the same thing on two GPUs. Read down a row, not
+across the table.*
 
 The H100 run's fixed abort-delay window meant barge-in was effectively
 only tested at one of three load points -- the delay was longer than the
@@ -224,6 +258,24 @@ This is the part of the repo that took the most iteration, and the part
 most worth reading closely if you're deciding whether to trust the
 numbers above.
 
+**Model size, stated explicitly rather than left for a reader to
+notice.** Qwen2.5-1.5B-Instruct is not an arbitrary or convenient
+choice -- it's roughly the size a real-time conversational avatar would
+actually serve. A sub-500ms voice/video turnaround budget has to split
+across ASR, LLM generation, TTS, and (per the Diffusion section, below)
+frame rendering; an LLM alone has to fit in a fraction of that, which
+rules out anything in the 7B+ range this sweep doesn't test. **This
+choice has a direct, disclosed consequence for what the quantization
+findings mean:** a 1.5B model's weights are a few GB, and even
+unquantized they leave enormous KV-cache headroom on an 80-141GB card
+(`docs/decisions.md`, "Predictions, stated before measuring (Phase 3
+sweep)") -- there is almost no memory pressure here for quantization to
+relieve. AWQ and FP8's tradeoffs (and prefix caching's KV-cache-reuse
+benefit) could plausibly look different, in either direction, at a size
+where weights and KV-cache actually compete for VRAM. **Nothing in this
+repo tests that. The quantization and prefix-caching findings below are
+scoped to this model size and may not transfer to 7B+.**
+
 **Workload.** `harness.py` drives an OpenAI-compatible chat-completions
 endpoint with a fixed set of 8 short multi-turn conversations, measuring
 TTFT (time to first token), ITL (inter-token latency), E2E, and
@@ -243,9 +295,10 @@ AWQ p50 4.4% / p99 4.7% better -- see `results/h200/summary.md`).
 
 **Concurrency targeting.** Offered concurrency is held constant across
 arms, not arrival rate. Each arm's arrival rate is derived independently
-via Little's Law (`scripts/calibrate.py`, measuring low-load,
-unqueued service time per arm) to target the same concurrency (~1/8/32)
-for every arm. Holding arrival rate constant instead would mean a faster
+via Little's Law (queueing theory's `L = λW`: average requests in
+flight = arrival rate × average time each spends in the system --
+`scripts/calibrate.py`, measuring low-load, unqueued service time per
+arm) to target the same concurrency (~1/8/32) for every arm. Holding arrival rate constant instead would mean a faster
 arm gets evaluated at automatically lower concurrency than a slower
 one -- the axis this sweep measures would shift underneath the
 comparison. "Concurrency ≈ N" names the *offered* load implied by that
@@ -403,8 +456,12 @@ difference on this hardware, in contrast with H200's clear advantage
 (Findings, #2). FP8 (weight-only) is real in both directions:
 marginally faster at low load, ~14% slower at high load once the
 workload turns compute-bound. Prefix caching was this run's largest
-lever too (fp16 on vs. off at c≈32: TTFT p50 -27.8%, p99 -37.8%,
-single-run). Perplexity/quality was never measured on this run -- see
+lever too (fp16 on vs. off at c≈32: TTFT p50 -27.8%, single-run both
+sides; p99 -37.8%, on-side single-run against the off-side's later
+5-seed repeat-validated mean -- `docs/decisions.md`, "Corrected
+results," discloses both this figure and the single-run-only 45%
+number it superseded). Perplexity/quality was never measured on this
+run -- see
 Findings for the H200 measurement instead; nothing pairs an H100 latency
 number with an H200 quality number.
 
@@ -418,8 +475,11 @@ Full H100 narrative, tables, and plots as originally written:
 
 **A different environment and a different workload from everything
 above -- no vLLM, no server, plain `diffusers` on the same H200 pod.**
-Stable Diffusion 1.5, fp16, DPM-Solver++, 512x512 (SD1.5's native
-resolution). A proxy for a real-time avatar's frame renderer, not the
+Stable Diffusion 1.5, fp16, DPM-Solver++ (a fast ODE solver for the
+denoising schedule, chosen for its low-step-count quality -- the
+relevant property for a step-count-constrained real-time budget),
+512x512 (SD1.5's native resolution). A proxy for a real-time avatar's
+frame renderer, not the
 thing itself: no lip-sync, no audio conditioning, no temporal
 consistency across frames, no actual avatar-specific model -- a
 standard text-to-image diffusion model's per-frame cost structure,
@@ -470,11 +530,14 @@ predicted** -- VAE decode (~21.0ms) is slightly *larger* than one step
 
 ### LPIPS ranked the more-degraded image as closer to baseline
 
-The most useful methodological result in this repo, not because the
-metric is unusual (LPIPS is the standard choice for this exact
-comparison -- the same family DeepCache's and TeaCache's own papers
-use) but because trusting it alone here would have shipped the wrong
-conclusion.
+LPIPS (Learned Perceptual Image Patch Similarity) is a neural-network-
+based distance metric between two images -- lower means more similar,
+per the network's learned notion of perceptual similarity, not raw
+pixel difference. The most useful methodological result in this repo,
+not because the metric is unusual (LPIPS is the standard choice for
+this exact comparison -- the same family DeepCache's and TeaCache's own
+papers use) but because trusting it alone here would have shipped the
+wrong conclusion.
 
 | Steps | LPIPS distance (DeepCache vs. no-cache, same seed) |
 |---|---|
@@ -589,7 +652,18 @@ make kv-check      # KV-cache arithmetic, no server needed
    `pip freeze` this repo's numbers came from, for comparison, not a
    literal install target -- it's a full environment snapshot, not a
    minimal dependency list.
-3. Ship this repo to the pod (no `.git` needed on the pod side --
+3. **`tmux` is a hard dependency, not optional.** `scripts/sweep.sh` and
+   `scripts/perplexity_sweep.sh` (step 5, below) both launch the vLLM
+   server inside a detached `tmux` session so the script can poll it,
+   kill it, and restart it between arms without the server dying when
+   the SSH connection that started it does. Confirm it's present before
+   running either script -- it was already installed on the RunPod
+   PyTorch template this repo's own numbers came from, but that's not
+   guaranteed on every base image:
+   ```bash
+   which tmux || apt-get install -y tmux
+   ```
+4. Ship this repo to the pod (no `.git` needed on the pod side --
    `git archive` strips it, so provenance capture falls back to
    environment variables set at ship time):
    ```bash
@@ -597,7 +671,7 @@ make kv-check      # KV-cache arithmetic, no server needed
    GIT_DIRTY=$(git status --porcelain | grep -q . && echo true || echo false)
    git archive HEAD | ssh <pod> "mkdir -p /workspace/multimodal-avatar && tar -x -C /workspace/multimodal-avatar"
    ```
-4. Run the sweeps, from the pod, with the same SHA/dirty flag shipped as
+5. Run the sweeps, from the pod, with the same SHA/dirty flag shipped as
    environment variables so provenance blocks match what was actually
    pushed:
    ```bash
@@ -608,7 +682,7 @@ make kv-check      # KV-cache arithmetic, no server needed
      PROVENANCE_GIT_SHA=$GIT_SHA PROVENANCE_GIT_DIRTY=$GIT_DIRTY \
      scripts/perplexity_sweep.sh"      # perplexity -> results/h200/
    ```
-5. Pull results back and regenerate tables/plots:
+6. Pull results back and regenerate tables/plots:
    ```bash
    scp -r <pod>:/workspace/multimodal-avatar/results/h200 results/
    make analyze-h200
@@ -628,10 +702,13 @@ make perplexity-slices
 
 `requirements-pod-diffusion.txt` layers on top of a normal CUDA/torch
 install -- deliberately does not need `requirements-pod-h200.txt`'s
-CUDA-12.8 pin, since this phase runs with vLLM out of the picture:
+CUDA-12.8 pin, since this phase runs with vLLM out of the picture. This
+pod's base image enforces PEP 668 (`externally-managed-environment`) --
+same reason the vLLM install above needs `--break-system-packages`;
+omitting it here fails the same way:
 
 ```bash
-pip install -r requirements-pod-diffusion.txt
+pip install -r requirements-pod-diffusion.txt --break-system-packages
 make diffusion          # step-count sweep, with and without DeepCache -> results/h200/diffusion/
 make diffusion-quality  # LPIPS between a DeepCache frame and its non-cached baseline
 ```
@@ -664,10 +741,13 @@ make diffusion-quality  # LPIPS between a DeepCache frame and its non-cached bas
   distinct conversations would see a smaller effect than the -32.8%/
   -39.8% reported here; this number is an upper bound on the lever, not
   a general prediction. (Issue #6.)
-- **One model, one size.** Everything here is Qwen2.5-1.5B-Instruct.
-  None of it generalizes to other model families or sizes -- quantization
-  cost and prefix-caching benefit both plausibly scale differently with
-  model size, untested.
+- **One model, one size, chosen deliberately (see "Model size" under
+  Methodology), but still untested at any other size.** Everything here
+  is Qwen2.5-1.5B-Instruct. None of it generalizes to other model
+  families or sizes -- quantization cost and prefix-caching benefit both
+  plausibly scale differently with model size, and 1.5B specifically has
+  little memory pressure for quantization to relieve in the first place,
+  untested at a size where that would differ.
 - **Barge-in at c≈32 is confounded by queueing.** The abort window is
   sized off unqueued (c≈1) service time; at c≈32, real queueing inflates
   actual wait time, so 11.6-26.5% of aborts land during the queueing/TTFT
@@ -695,10 +775,25 @@ make diffusion-quality  # LPIPS between a DeepCache frame and its non-cached bas
   *why* is not established.
 - **Concurrency tested at three points (≈1/8/32), not a continuous
   curve.** Behavior between or beyond these points is not measured.
-- **The H200 c≈32 prefix-caching-on number is single-run**, not yet
-  repeat-validated the way the rest of the AWQ/prefix-caching comparison
-  is (Findings, #1) -- the direction and rough magnitude aren't in
-  doubt, but the exact percentage could move somewhat on a repeat pass.
+- **The prefix-caching-on number is single-run on both environments** --
+  not yet repeat-validated the way the rest of the AWQ/prefix-caching
+  comparison is, on H200 (Findings, #1) *or* on H100 (the headline H100
+  number in that environment's own section). The direction and rough
+  magnitude aren't in doubt on either, but the exact percentages could
+  move somewhat on a repeat pass.
+- **The KV-cache check (Findings, #5) validates bytes-per-token from a
+  live allocation, not a full-sequence or per-max-context figure.**
+  vLLM's paged allocator reserves blocks per token a sequence has
+  actually generated, not its full context length up front -- this
+  check confirms the per-token arithmetic matches what the server
+  actually allocated, it does not validate a complete memory-footprint
+  model for a running sequence.
+- **c≈1 has a much smaller sample than c≈8/c≈32** (roughly 300 requests
+  in a 20s window at the lowest offered rate, vs. thousands at higher
+  concurrency -- `docs/decisions.md`, "Load-run duration"). p50 at c≈1 is
+  fine at that sample size; p99 there is noisier than at the higher-
+  concurrency points, where the load itself supplies more samples
+  regardless of duration.
 - **Diffusion: one model, one resolution, one caching method.** Stable
   Diffusion 1.5 at 512x512 only -- no SDXL, no video-native model, no
   other resolution tested. The fixed-cost finding (conditioning + VAE
@@ -718,3 +813,9 @@ make diffusion-quality  # LPIPS between a DeepCache frame and its non-cached bas
   cost is severe at steps=4 and steps=20" is a real, visually-confirmed
   finding; "exactly how severe, in a way that generalizes" is not
   established by two image pairs.
+- **Quality cost checked at only 2 of the 8 step counts in the speedup
+  table** (steps=4 and steps=20) -- a distinct scope limit from "one
+  fixed hyperparameter setting," above. The speedup curve is
+  characterized across the full 1-20 step range; the quality cost is
+  not. "Severe at both ends tested" is not the same claim as "severe at
+  every step count."
