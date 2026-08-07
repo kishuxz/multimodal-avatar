@@ -1,6 +1,10 @@
 #!/bin/bash
-# Phase 4: perplexity on the fixed wikitext-2 slice, fp16 + AWQ. Runs on the
-# pod, against a server it starts itself -- same shape as scripts/sweep.sh.
+# Phase 4: perplexity across 8 distinct wikitext-2 slices, fp16 + AWQ. Runs
+# on the pod, against a server it starts itself -- same shape as
+# scripts/sweep.sh. Cross-slice mean/sd is the noise band this measurement
+# is judged against -- a single slice, however many times repeated, can't
+# supply one (forced-decoding on one fixed input is deterministic; see
+# docs/decisions.md).
 #
 # FP8 is not run here. Issue #29: vLLM 0.19.1's online FP8 on this pod
 # produces corrupted output from the first token, not degraded-but-coherent
@@ -18,10 +22,9 @@ cd "$REPO_ROOT"
 
 BASE_URL="http://localhost:8000/v1"
 GPU_MEM_UTIL=0.9
-REPEATS=5
 TMUX_SESSION="vllm-sweep"
 RESULTS_DIR="results/h200"
-SLICE="data/wikitext2_test_slice_token_ids.json"
+SLICES="data/wikitext2_test_slices.json"
 
 mkdir -p "$RESULTS_DIR"
 
@@ -75,13 +78,13 @@ stop_server() {
 run_arm() {
     # run_arm <label> <model> [extra vllm flags...]
     local label="$1" model="$2"; shift 2
-    local out="$RESULTS_DIR/perplexity_${label}.json"
+    local out="$RESULTS_DIR/perplexity_multislice_${label}.json"
 
     start_server "$label" "$model" "$@"
-    log "perplexity (${REPEATS} repeats): arm=$label"
-    python3 scripts/perplexity.py \
+    log "perplexity (8 slices, 1 pass each): arm=$label"
+    python3 scripts/perplexity_multislice.py \
         --base-url "$BASE_URL" --model "$model" --label "$label" \
-        --slice "$SLICE" --repeats "$REPEATS" \
+        --slices "$SLICES" \
         --out "$out"
     stop_server
 }
