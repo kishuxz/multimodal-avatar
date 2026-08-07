@@ -13,8 +13,15 @@ TODO (Phase 4): stated precisely once Phase 1-3 results exist.
 
 ## Setup
 
-- Hardware: RunPod, single H100 SXM 80GB.
-- Serving: official vLLM OpenAI-compatible Docker image, pinned tag TBD.
+- Hardware: RunPod, single H100 80GB HBM3. Driver `580.126.09`, host CUDA 13.0.
+- Container: `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (base image;
+  `pip install vllm` replaces its torch build -- see below).
+- Serving: `vllm serve`, version `0.26.0`, installed via `pip install vllm`
+  on RunPod's PyTorch base image -- not the official vLLM Docker image
+  as originally planned; see `docs/decisions.md`.
+- torch as actually running: `2.11.0+cu130` (the base image ships
+  `2.8.0+cu128`; installing vLLM upgrades it). No `flash-attn`;
+  `flashinfer-python 0.6.14` is the attention kernel backend in use.
 - Model: `Qwen/Qwen2.5-1.5B-Instruct`, plus AWQ-Int4 and FP8 variants.
 - Workload: see `harness.py` and `scripts/sweep.sh` once written.
 
