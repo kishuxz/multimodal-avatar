@@ -1,5 +1,10 @@
 # avatar-inference-bench
 
+*The GitHub contributor list shows two accounts, `kishuxz` and
+`kishore-crux` -- both mine. A handful of squash-merge commits carry the
+older account's identity for reasons GitHub doesn't allow fixing after
+the fact; see "Squash-merge authorship" in `docs/decisions.md`.*
+
 A latency and quality benchmark for a real-time conversational avatar's
 two costliest components: the LLM-serving backend and the
 diffusion-based frame renderer's per-frame cost. Built to show where a
