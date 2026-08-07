@@ -13,17 +13,30 @@ repeat-validating the prefix-caching number -- GPU required), Phase 6
 pass), Phase 8 (go public). See `docs/decisions.md` for the full
 narrative and every non-obvious call made along the way.
 
-## Hardware change: the pod behind every number below is gone
+## The H200 run is a fresh baseline, not a continuation
 
-Every result in `results/*.json`, and everything derived from it in this
-README and in `docs/decisions.md`, was measured on a RunPod H100 80GB
-HBM3. That pod was stopped and reclaimed. Its replacement is a
-different GPU -- H200 SXM 141GB, different driver, different
-datacenter -- not a restart of the same one. **Nothing below this point
-is comparable to a number measured on the new pod, and nothing in this
-repo mixes the two.** Phase 1-3 gets fully re-run on the new hardware
-rather than extended in place; see `docs/decisions.md` for the full
-entry and the predictions stated before that re-run.
+The H100 80GB HBM3 pod behind every number in the Results section below
+was stopped and reclaimed. Its replacement runs on a different driver
+that caps out at CUDA 12.8 -- a redeploy was attempted specifically to
+check whether that was a property of the one pod or of this RunPod
+allocation generally; the second pod reports the same driver and the
+same container hostname as the first, so the allocation itself is the
+ceiling, not a fluke of one pod. That forces vLLM down to 0.19.1 (from
+0.26.0), which has two further consequences, not one: a different
+attention backend (FlashAttention v3, not flashinfer), and a different
+FP8 recipe (W8A8 with dynamic activation scaling, not weight-only
+static-scale -- confirmed by reading the resolved quantization config
+directly, not assumed from the flag name; see `docs/decisions.md`).
+
+**Four variables differ between the H100 run and the H200 run: GPU,
+vLLM version, attention backend, and FP8 semantics.** Not one. **No
+table, plot, or claim in this repo mixes numbers from the two.** The
+H100 results below are kept, not deleted -- they're a prior run on their
+own hardware and software, still true for what produced them, labeled
+with their own environment block. The H200 run gets its own Results
+section once it has one; until then, everything below this point is the
+H100 baseline, explicitly. Full reasoning: `docs/decisions.md`, "The
+H200 run is a fresh baseline, not a continuation."
 
 ## The question
 
@@ -31,11 +44,13 @@ TODO (Phase 4): stated precisely once Phase 1-3 results exist.
 
 ## Setup
 
-**Everything in this section describes the Phase 1-3 (H100) environment
-that produced the results below.** It's superseded, not current -- see
-"Hardware change" above. Left as-is rather than rewritten in place, so
-the results below stay traceable to the setup that actually produced
-them; the re-run's environment gets its own entry once it exists.
+Two environment blocks below, kept separate deliberately -- see "The
+H200 run is a fresh baseline" above for why. The H100 block describes
+what actually produced every number in the Results section below it;
+the H200 block describes the environment confirmed and ready for the
+re-run, whose own results aren't in this README yet.
+
+### H100 (Phase 1-3, prior run -- produced every number in Results below)
 
 - Hardware: RunPod, single H100 80GB HBM3. Driver `580.126.09`, host CUDA 13.0.
 - Container: `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` -- a starting
@@ -44,11 +59,13 @@ them; the re-run's environment gets its own entry once it exists.
 - Serving: `vllm serve`, version `0.26.0`, installed via `pip install vllm`
   on the base image -- not the official vLLM Docker image as originally
   planned; see `docs/decisions.md`.
-- **Resolved environment: `requirements-pod.txt`** (a `pip freeze` off the
-  pod after install) is the source of truth for exact versions, not the
-  container tag. Notably: `torch==2.11.0` (base image ships `2.8.0+cu128`;
-  vLLM's dependency resolution upgrades it to CUDA 13.0), no `flash-attn`,
-  `flashinfer-python==0.6.14` as the attention kernel backend.
+- **Resolved environment: `requirements-pod-h100.txt`** (a `pip freeze`
+  off this pod after install) is the source of truth for exact versions,
+  not the container tag. Notably: `torch==2.11.0+cu130` (base image
+  ships `2.8.0+cu128`; vLLM's dependency resolution upgrades it to CUDA
+  13.0 -- this pod's driver, `580.126.09`, supports that), no
+  `flash-attn`, `flashinfer-python==0.6.14` as the attention kernel
+  backend.
 - Model: `Qwen/Qwen2.5-1.5B-Instruct`, plus `Qwen/Qwen2.5-1.5B-Instruct-AWQ`
   and an on-the-fly FP8 variant (`--quantization fp8_per_tensor`).
   **The FP8 arm is weight-only, static-scale, uncalibrated** -- weights
@@ -69,6 +86,51 @@ them; the re-run's environment gets its own entry once it exists.
   x 2 barge-in fractions x prefix-caching on/off (fp16 only) x one
   closed-loop contrast run per arm, restarting the server cleanly and
   confirming a cold cache between every configuration.
+
+### H200 (fresh baseline -- environment confirmed, results below are still H100's)
+
+- Hardware: RunPod, single H200 SXM 141GB (143771 MiB reported by
+  `nvidia-smi`). Driver `570.124.06`, host CUDA 12.8 -- a redeploy was
+  attempted to check whether this was one pod's problem; the second pod
+  reported the same driver and the same container hostname, so this is
+  the allocation's ceiling, not one bad pod.
+- Serving: `vllm serve`, version `0.19.1` -- not `0.26.0`. `pip install
+  vllm` resolves `0.26.0` + `torch==2.11.0+cu130` here too, same as the
+  H100 pod, but this driver only supports CUDA 12.8, so that combination
+  can't initialize CUDA at all. `0.19.1` is the newest release whose
+  PyPI wheel is still built against CUDA 12.x; confirmed empirically
+  (server starts, model loads, serves a request), not just installed.
+  See `docs/decisions.md`, "H200 environment rebuild."
+- **Resolved environment: `requirements-pod-h200.txt`.** Notably:
+  `torch==2.10.0+cu128` (not `2.11.0+cu130`), no `flash-attn` package,
+  `flashinfer-python==0.6.6` installed but **not** the attention backend
+  actually selected -- vLLM 0.19.1 picks `FLASH_ATTN` (FlashAttention
+  v3) here instead.
+- Model: same three arms as the H100 run, but **the FP8 arm is a
+  different intervention, not the same flag on newer hardware.**
+  `--quantization fp8_per_tensor` (the H100 flag) isn't confirmed to
+  exist in 0.19.1; the working flag is bare `--quantization fp8`, and
+  it resolves to **W8A8 with dynamic activation scaling** -- weights
+  *and* activations both move to `torch.float8_e4m3fn`, scale
+  recomputed every forward pass. Confirmed by reading the live resolved
+  `Fp8Config` object (`activation_scheme: dynamic`,
+  `is_checkpoint_fp8_serialized: False`), not assumed from the flag
+  name. The H100's FP8 arm was weight-only with a static scale,
+  activations left in bf16 -- a different recipe. See
+  `docs/decisions.md`, "FP8 on vLLM 0.19.1," for the full check and why
+  this changes what the H200 FP8 arm's numbers should be expected to
+  look like.
+- AWQ auto-selects `awq_marlin` -> `MacheteLinearKernel` here (recorded
+  now; no H100-side capture exists yet to compare against).
+- Workload, load design, and sweep orchestration: same `harness.py` /
+  `scripts/calibrate.py` / `scripts/sweep.sh` design as the H100 run,
+  with four methodology improvements folded in before this run rather
+  than repeating the H100 sweep's design as-is -- scaled barge-in
+  window, server startup logs captured per run, repeats built into the
+  matrix, and a file-classification assertion in `scripts/analyze.py`.
+  See `docs/decisions.md`, "Sweep v2."
+- **No results yet.** This block documents the confirmed environment,
+  not a completed run -- the sweep itself is still pending.
 
 ## Results
 
@@ -165,9 +227,11 @@ with/without comparison the plot makes is unaffected; see
 - **Hardware-locked, and this already happened once:** this section
   originally stated as a hypothetical that a future run on different
   silicon wouldn't be comparable to these results. It's no longer
-  hypothetical -- the H100 pod is gone, its replacement is an H200, and
-  Phase 1-3 is being re-run rather than extended. See "Hardware change"
-  near the top of this file.
+  hypothetical -- the H100 pod is gone, and the replacement isn't just
+  different hardware: GPU, vLLM version, attention backend, and FP8
+  semantics all differ from what produced the numbers above. See "The
+  H200 run is a fresh baseline" near the top of this file. Phase 1-3 is
+  being re-run as a fresh baseline, not extended in place.
 - The prefix-caching effect (this sweep's largest finding) is single-run,
   not yet repeat-validated the way the quantization comparison is.
 - The KV cache arithmetic check (`scripts/kv_cache_check.py`,
@@ -180,11 +244,12 @@ with/without comparison the plot makes is unaffected; see
 
 ## What's next
 
-- Immediate: Phase 1-3 re-run on the new H200 pod (see "Hardware
-  change" above) -- environment rebuild first, then the sweep, improved
-  rather than repeated as-is (scaled barge-in window, server startup
-  logs captured per run, repeats built into the matrix, stricter
-  file-classification in `scripts/analyze.py`).
+- Immediate: environment confirmed (see the H200 Setup block above) --
+  next is a calibration-only checkpoint (per-arm derived rates, reported
+  before any load-test traffic runs), then the full sweep with the four
+  v2 improvements (scaled barge-in window, server startup logs captured
+  per run, repeats built into the matrix, stricter file-classification
+  in `scripts/analyze.py`).
 - Phase 4 (GPU required): perplexity across arms, with its own noise
   band; repeat-validate the prefix-caching number the same way
   quantization was.

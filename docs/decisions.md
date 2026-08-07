@@ -788,6 +788,37 @@ same rate -- so the low-load FP8 edge may be smaller in absolute ms, or
 harder to distinguish from noise, than the already-marginal H100 number
 was.
 
+**Superseded -- the paragraph above assumed weight-only FP8, matching
+the H100 arm, and reasoned entirely in terms of memory-bandwidth relief.
+PR #24 found that's wrong for what's actually running here:** vLLM
+0.19.1's plain `fp8` is W8A8 with dynamic activation scaling -- weights
+*and* activations both quantized, scale recomputed every forward pass
+(see "FP8 on vLLM 0.19.1" below). That's a different mechanism, not the
+same mechanism in a roomier memory budget, and it changes the
+prediction rather than just adjusting its magnitude.
+
+**Predicted (this supersedes the FP8-specific paragraph above, not just
+adjusts it):** dynamic activation quantization is a per-forward-pass
+compute cost -- quantize, compute a scale, dequantize -- that doesn't
+shrink with more VRAM, because it was never a memory-capacity problem to
+begin with. More HBM and more bandwidth do nothing to relieve a cost
+that's compute, not memory. **The H200 FP8 arm may be slower than the
+H100 FP8 arm's numbers at every load level tested, including low load,
+where the H100's weight-only arm had its one small real win (8.23 vs
+8.39ms).** If so, that isn't H200 underperforming H100 -- it's two
+different interventions sharing an arm label, one of which does
+strictly more work per token than the other.
+**What would falsify this:** the H200 FP8 arm's low-load TTFT p50
+coming in at or below the H100 FP8 arm's 8.23ms would be the surprise --
+it would mean the dynamic-activation-quantization overhead is smaller
+in practice than the mechanism argument above predicts, and that's
+worth profiling rather than waving off as "H200 is just faster."
+Separately: if the numbers come back and don't show a compute-bound-
+shaped penalty at all (e.g. the H200 FP8 arm tracks fp16 closely at
+every load point), the first thing to check is whether the online W8A8
+path is actually the one running at request time -- re-verify with the
+same live-config-read method PR #24 used, not assumed to still hold.
+
 **Predicted, and the reason this isn't just "H200 is faster so multiply
 by a constant":** concurrency ~=1/8/32 is derived per-arm from that
 arm's own H200 service time via `scripts/calibrate.py` (Little's Law),
@@ -863,6 +894,56 @@ distinct from "weight-only, static scale" for the H100 arm -- not reuse
 the H100 arm's FP8 description. If a future vLLM version on either
 environment changes this again, re-verify the same way rather than
 assuming either recipe carries forward.
+## The H200 run is a fresh baseline, not a continuation
+
+**Found, once the redeploy attempt confirmed the driver:** a second H200
+pod was requested specifically to test whether the CUDA-13/driver
+mismatch (see "H200 environment rebuild" above) was a property of the
+first pod or of RunPod's US-NC-1 H200 allocation generally. The
+redeployed pod reports the same driver (`570.124.06`), and the same
+container hostname (`3a4e9ae6f924`) as the original -- RunPod appears to
+have handed back the same physical host, not different hardware. vLLM
+0.19.1 remains the ceiling; 0.26.0 is not reachable on this allocation.
+**Chose:** stop trying to eliminate the software variable and proceed on
+0.19.1, per the standing instruction that a second 570-series result
+ends the attempt rather than prompting a third.
+**Why it matters, stated as its own entry rather than left implicit
+across three separate ones:** the H200 run does not differ from the
+H100 run in one way (hardware). It differs in **four**, independently:
+- **GPU** -- H100 80GB HBM3 vs H200 SXM 141GB (see "Hardware change").
+- **vLLM version** -- 0.26.0 vs 0.19.1, forced by the driver, not chosen
+  (see "H200 environment rebuild").
+- **Attention backend** -- flashinfer 0.6.14 vs FlashAttention v3, a
+  consequence of the version difference, not set directly (same entry).
+- **FP8 semantics** -- weight-only static-scale vs W8A8 dynamic-scale, a
+  consequence of the vLLM version difference reaching all the way into
+  what the FP8 arm's flag *means* (see "FP8 on vLLM 0.19.1").
+Any one of these alone would be enough to block a direct comparison.
+Together, "the H200 run" is not the H100 run measured again on newer
+hardware -- it's a different measurement that happens to share a
+workload design (`harness.py`, the arm/load/barge-in/prefix-caching
+matrix) with the H100 run, not its results.
+**Chose:** treat the H200 sweep as a fresh baseline. The H100 results
+stay in this repo, unchanged and undeleted, clearly labeled as a prior
+run with their own environment block -- not superseded, not silently
+replaced. **No table, plot, or claim in this repo mixes H100 and H200
+numbers.** Where a comparison between them is interesting (e.g. "is
+FP8 still a net win on newer hardware"), it gets stated as a comparison
+between two different, named environments, with the four differences
+above listed alongside it -- never as a single number implying nothing
+changed but the GPU.
+**Rejected:** treating the H200 run as simply "the same sweep, re-run."
+That framing would silently launder four real differences into what
+looks like a hardware-only comparison, which is exactly the kind of
+thing this repo's own stated rule (predict before measuring, provenance
+on every result) exists to prevent.
+**How to apply:** a repo that documents a hardware/environment change
+and keeps both result sets, clearly separated, reads as rigor. A repo
+that quietly drops the old numbers and starts over reads as something
+went wrong and got hidden. The old results are not a mistake to erase;
+they're the H100 baseline, still true for the hardware that produced
+them.
+
 ## Sweep v2: four fixes folded into the design, not bolted on after
 
 Before any GPU time goes toward a re-run, `scripts/sweep.sh` and
