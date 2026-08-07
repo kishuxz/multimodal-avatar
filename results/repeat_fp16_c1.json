@@ -1,0 +1,114 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T08:26:56.780211+00:00",
+    "git_sha": "7908cfaf0da52265e95716e84427685502f98ee3",
+    "git_dirty": false,
+    "git_sha_source": "env (shipped from transfer machine)",
+    "gpu": {
+      "name": "NVIDIA H100 80GB HBM3",
+      "driver_version": "580.126.09",
+      "driver_max_cuda_version": "13.0"
+    },
+    "vllm_version": "0.26.0",
+    "vllm_docker_image": null,
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--base-url",
+      "http://localhost:8000/v1",
+      "--model",
+      "Qwen/Qwen2.5-1.5B-Instruct",
+      "--label",
+      "fp16_c1",
+      "--mode",
+      "open",
+      "--rate",
+      "15.5834",
+      "--duration",
+      "20",
+      "--warmup",
+      "5",
+      "--repeats",
+      "5",
+      "--seed-start",
+      "0",
+      "--out",
+      "results/repeat_fp16_c1.json"
+    ],
+    "extra": {
+      "script": "repeat_check.py",
+      "label": "fp16_c1"
+    }
+  },
+  "config": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "label": "fp16_c1",
+    "mode": "open",
+    "rate": 15.5834,
+    "concurrency": null,
+    "duration": 20.0,
+    "warmup": 5,
+    "repeats": 5,
+    "seed_start": 0,
+    "out": "results/repeat_fp16_c1.json"
+  },
+  "stats": {
+    "ttft_p50_s": {
+      "mean": 0.008392022177577018,
+      "stdev": 4.5017910639448085e-05,
+      "min": 0.008324747905135155,
+      "max": 0.008441654965281487
+    },
+    "ttft_p99_s": {
+      "mean": 0.014004720706492677,
+      "stdev": 0.0017748957294765136,
+      "min": 0.012182142287492754,
+      "max": 0.016721528954803944
+    },
+    "total_errors": 0
+  },
+  "per_repeat": [
+    {
+      "seed": 0,
+      "out": "results/repeat_fp16_c1_seed0.json",
+      "ttft_p50_s": 0.008441654965281487,
+      "ttft_p99_s": 0.016721528954803944,
+      "requests_ok": 327,
+      "requests_error": 0
+    },
+    {
+      "seed": 1,
+      "out": "results/repeat_fp16_c1_seed1.json",
+      "ttft_p50_s": 0.00838036835193634,
+      "ttft_p99_s": 0.014608758017420858,
+      "requests_ok": 297,
+      "requests_error": 0
+    },
+    {
+      "seed": 2,
+      "out": "results/repeat_fp16_c1_seed2.json",
+      "ttft_p50_s": 0.00842328742146492,
+      "ttft_p99_s": 0.01280231185257434,
+      "requests_ok": 318,
+      "requests_error": 0
+    },
+    {
+      "seed": 3,
+      "out": "results/repeat_fp16_c1_seed3.json",
+      "ttft_p50_s": 0.008390052244067192,
+      "ttft_p99_s": 0.013708862420171488,
+      "requests_ok": 312,
+      "requests_error": 0
+    },
+    {
+      "seed": 4,
+      "out": "results/repeat_fp16_c1_seed4.json",
+      "ttft_p50_s": 0.008324747905135155,
+      "ttft_p99_s": 0.012182142287492754,
+      "requests_ok": 289,
+      "requests_error": 0
+    }
+  ]
+}

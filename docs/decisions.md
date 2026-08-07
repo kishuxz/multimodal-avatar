@@ -266,3 +266,260 @@ falsely precise point estimate.
 (e.g. a different `max_tokens`, a different quantization backend) gets
 re-verified with this script rather than assumed to inherit this
 result -- it measures the mechanism, not a universal constant.
+
+## Predictions, stated before measuring (Phase 3 sweep)
+
+Qwen2.5-1.5B: 28 layers, 12 query heads, 2 KV heads -- aggressive GQA
+(6:1), so the KV cache is roughly a sixth the size of full multi-head
+attention at the same context length. On an 80GB H100 with a 1.5B
+model, there is almost no memory pressure for quantization to relieve:
+weights are a few GB, KV cache has enormous headroom even unquantized.
+
+**Predicted:** small or negative latency deltas between arms at low
+concurrency. Any quantization benefit should appear only at high
+concurrency, where batch memory pressure (KV cache competing with
+weights for the 90% GPU-memory-utilization budget, more sequences
+resident at once) starts to matter.
+
+**Predicted, AWQ specifically:** may be *slower* than fp16 at low load.
+AWQ's int4 weights require a dequantization step per matmul; that's a
+fixed compute cost that only pays for itself when you were bandwidth-
+bound on weight loading in the first place. At low concurrency with
+this small a model, bandwidth was never the bottleneck -- so the dequant
+overhead is pure addition, not a trade.
+
+**Predicted, FP8 specifically:** same shape as AWQ's prediction (small/
+negative at low load, possible benefit only at high concurrency) --
+plus a scope note that matters for interpreting whatever the numbers
+say: vLLM's on-the-fly `fp8_per_tensor` is weight-only with a *static*
+scale computed from the weights themselves, not the calibrated W8A8
+(weights and activations both quantized, activation scales fit against
+a calibration dataset) that most published FP8 checkpoints use.
+Confirmed directly from vLLM 0.26.0's own engine startup log (not
+assumed): `quantization_config=QuantizationConfigArgs(linear=QuantSpec(
+weight=QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(static=True,
+...)), activation=None), moe=QuantSpec(..., activation=None))` --
+`activation=None` on both `linear` and `moe` means activations stay in
+bf16, only weights move to fp8. This arm tests a *different*
+intervention than a calibrated FP8 checkpoint would, and the README
+must say so wherever FP8 numbers appear -- these predictions, and any
+results, are about weight-only dynamic-scale FP8, not W8A8.
+
+**If the data contradicts any of this, that is the more useful result**
+-- it means either the memory-pressure model above is wrong for this
+model/hardware combination, or something about this specific serving
+setup (batching behavior, kernel selection, the `deep_gemm` import
+failure noted above) is doing something the simple story doesn't
+predict. Either way it gets written up, not smoothed over.
+
+## FP8 arm: which flag, and why (issue: don't assume the API)
+
+**Chose:** `--quantization fp8_per_tensor`.
+**Rejected:** a bare `--quantization fp8` (does not exist in vLLM
+0.26.0 -- `_ONLINE_SHORTHANDS` in `vllm/config/quantization.py` has no
+plain `"fp8"` key; this is a genuine API change from older vLLM
+versions where that flag existed, not a typo). Also rejected
+`fp8_per_channel` and `fp8_per_block`: viable alternatives (per-channel
+or per-block weight scale granularity instead of per-tensor), but
+`fp8_per_tensor` is the simplest, most-standard-sounding on-the-fly
+recipe and there's no reason in this project's goals to need finer
+scale granularity.
+**Why it matters:** the three online shorthands differ only in scale
+*granularity* (per-tensor / per-channel / per-block), not in whether
+activations are quantized -- source inspection alone left that
+genuinely ambiguous (a code comment on `fp8_per_channel` claims
+"dynamic per-token activation" while the `QuantSpec` it constructs only
+sets `weight`, not `activation`). Resolved by loading the model and
+reading vLLM's own engine-init log rather than trusting either the
+comment or the schema in isolation -- see the prediction entry above
+for the exact confirmed config.
+**How to apply:** if a future vLLM upgrade changes `_ONLINE_SHORTHANDS`
+or this repo ever wants a genuinely calibrated W8A8 FP8 arm (a
+pre-quantized checkpoint, not an on-the-fly flag), that's a different
+experiment and needs its own entry here, not a silent swap of what
+"the FP8 arm" means.
+
+## Holding concurrency constant, not arrival rate (Phase 3 sweep)
+
+**Chose:** derive each arm's arrival rate independently via Little's
+Law to target the same offered concurrency (~1 / 8 / 32) across fp16,
+AWQ, and FP8 -- not the same arrival rate.
+**Rejected:** holding arrival rate (requests/sec) constant across arms
+and letting realized concurrency vary by arm.
+**Why:** service time differs by arm (that's the whole point of
+testing quantization), so the two choices are different experiments.
+Holding arrival rate constant would mean a faster arm is automatically
+evaluated at *lower* concurrency than a slower one -- the axis this
+sweep is trying to measure an effect along would also be shifting
+underneath the comparison, conflating "this arm is faster" with "this
+arm was tested at an easier operating point." Holding concurrency
+constant instead means every arm is compared at the same point on the
+load curve, which is also the standard framing for reporting
+quantization results elsewhere (throughput/latency *at a given batch
+size or concurrency*) -- and it's what the predictions above are stated
+in terms of ("at high concurrency"), so it's the comparison that
+actually tests them.
+**How to apply:** "concurrency ~= 1/8/32" is the *offered* load implied
+by a low-load (unqueued) service-time measurement via Little's Law, not
+a guarantee of the realized average number of requests in flight --
+under real queueing near saturation, realized concurrency can run
+higher than the target once a server falls behind. The README names
+this as the design that ran; a different, arrival-rate-held-constant
+sweep would answer a different question and needs to be labeled as
+such if it's ever run.
+
+## --gpu-memory-utilization fixed at 0.9 across every arm
+
+**Chose:** every server start in `scripts/sweep.sh` passes
+`--gpu-memory-utilization 0.9`, unconditionally, regardless of arm.
+**Why:** this setting determines how much VRAM is left for the KV
+cache after weights and activation memory are reserved. Letting it
+vary per arm (e.g. raising it for a smaller-weight quantized arm to
+"use the freed memory") would mean any latency/throughput difference
+observed is partly attributable to a different KV cache budget, not
+just the quantization -- exactly the confound the Phase 1 harness
+critique flagged as a way to accidentally measure a setting instead of
+an intervention. `scripts/sweep.sh`'s `confirm_cache_cold` check also
+verifies the prefix cache is actually empty right after each restart,
+rather than assuming a fresh process implies a cold cache.
+
+## Prefix caching: off is the cross-arm baseline (caught before it shipped)
+
+**Found:** the first calibration pass ran fp16 with prefix caching on
+and AWQ/FP8 with it on too by default in the original `sweep.sh` --
+but that default was never actually deliberate, it was just what
+`--enable-prefix-caching` happened to be wired to for every non-fp16
+arm. The result: fp16's calibrated mean service time (60.7ms) looked
+faster than AWQ's (68.5ms), and there was no way to tell how much of
+that gap was quantization versus prefix caching, since both arms had
+it on. On a multi-turn workload built from eight fixed conversations
+(`harness.py`'s `USER_TURNS`), prefix caching is not a minor effect --
+repeated prefixes are exactly what it's designed to exploit.
+**Chose:** prefix caching off is now the baseline for every arm.
+AWQ and FP8 run with it off, full stop. fp16 runs both off (the same
+baseline as the other two arms) and on (its own additional dimension,
+not a different starting condition).
+**Why:** the whole point of comparing arms is that everything except
+the quantization is held equal. A cross-arm latency gap is only
+attributable to quantization if every other lever, including prefix
+caching, was in the same position for every arm. fp16-on-vs-off stays
+a legitimate, separate comparison -- it just isn't the number that
+gets compared against AWQ or FP8.
+**How to apply:** any future arm added to this sweep runs with prefix
+caching off by default, matching the baseline, unless prefix caching
+itself is the thing being studied for that arm.
+
+## Load-run duration: 20s, validated, not assumed
+
+**Chose:** 20s per load run (was 120s in the original design), applied
+uniformly across every load point in the sweep.
+**Why:** at the concurrency~=32 rate (~500 req/s for this model),
+120s is 60,000+ requests -- dominates GPU spend for a percentile
+estimate that doesn't need that many samples. Checked rather than
+guessed: ran the same config (fp16, prefix off, rate=513 req/s) at
+20s and 60s. TTFT p99: 106.9ms (n=7970) vs 99.5ms (n=23831) -- about
+7% apart, judged stable enough to use the shorter duration.
+**Known tradeoff, disclosed rather than hidden:** applying 20s
+*uniformly* means the low end of the matrix (concurrency~=1, roughly
+16 req/s) gets only ~300 samples in a 20s window, versus ~1900 at the
+original 120s. p50/p95 are still reasonably estimated at that sample
+size; p99 there is noisier than at the high-concurrency points, where
+the high arrival rate itself supplies plenty of samples regardless of
+duration. This is a deliberate choice to control GPU cost, not an
+oversight -- if the low-concurrency p99 turns out to matter for a
+specific finding, that arm/load point can be re-run at longer duration
+individually rather than paying the cost everywhere.
+**How to apply:** `CALIB_DURATION` (30s) is unchanged -- calibration
+runs closed-loop at concurrency=1, which is inherently low-volume
+(~500 requests in 30s) regardless of the eventual load rate, so it was
+never the cost driver this check was about.
+
+## Corrected results: noise band first, then the actual finding
+
+The first write-up of these numbers (PR #18, before this entry) made
+two mistakes worth recording alongside the fix, not just silently
+correcting: it called FP8 "slower than fp16 at both ends" when the
+data already showed it faster at low load and slower at high, and it
+called a 2.4% single-run gap between AWQ and fp16 a "crossover"
+without ever checking whether that gap was bigger than one arm's own
+run-to-run noise. Both are now fixed, from real repeat data --
+5 runs per arm, concurrency ~= 1 and ~= 32, prefix caching off,
+identical config, seeds 0-4 (`scripts/repeat_check.py`,
+`results/repeat_*.json`).
+
+**TTFT p50 / p99, mean +/- stdev across 5 repeats:**
+
+| | concurrency ~= 1 (p50) | concurrency ~= 1 (p99) | concurrency ~= 32 (p50) | concurrency ~= 32 (p99) |
+|---|---|---|---|---|
+| fp16 | 8.39 +/- 0.05 ms | 14.00 +/- 1.77 ms | 37.31 +/- 2.43 ms | 88.58 +/- 7.31 ms |
+| AWQ | 10.47 +/- 0.37 ms | 16.85 +/- 1.23 ms | 37.79 +/- 0.76 ms | 91.35 +/- 9.21 ms |
+| FP8 (weight-only) | 8.23 +/- 0.11 ms | 13.82 +/- 2.48 ms | 42.43 +/- 2.05 ms | 102.30 +/- 3.58 ms |
+
+**AWQ vs fp16:** at concurrency ~= 1, AWQ is 2.08ms slower than fp16,
+against a combined noise scale of a few tenths of a millisecond --
+five-plus standard deviations, clearly real, matches the prediction
+(dequant overhead, never bandwidth-bound at this batch size). At
+concurrency ~= 32, AWQ's mean (37.79ms) is actually *higher* than
+fp16's (37.31ms) -- the opposite direction from the single-run
+"crossover" claim -- but the 0.48ms gap is well inside fp16's own
++/-2.43ms run-to-run noise. **Corrected finding: no measurable
+difference between fp16 and AWQ at concurrency 32. At low load fp16
+is clearly ahead.** There is no crossover in this data. A single run
+each made it look like one; five did not.
+
+**FP8 (weight-only) vs fp16 -- a real, opposite-direction pattern,
+not the same story as AWQ:** at concurrency ~= 1, FP8 is marginally
+faster (8.23 vs 8.39ms) -- small, on the edge of FP8's own noise
+(+/-0.11ms), directionally consistent across all 5 repeats but not a
+large effect. At concurrency ~= 32, FP8 is clearly slower (42.43 vs
+37.31ms, ~14% higher) -- a ~5ms gap against a combined noise scale of
+2-2.5ms on each side, a real difference, not noise.
+**Candidate mechanism, stated as a hypothesis, not confirmed by
+profiling:** weight-only FP8 halves the bytes moved per forward pass
+(fp8 vs bf16 weights). At concurrency ~= 1, decode is memory-bandwidth
+bound and weights are read from HBM once per forward pass regardless
+of batch size -- smaller weights are a direct, nearly-free latency
+win when there's little compute happening anyway. At concurrency ~=
+32, the batch is large enough that the workload shifts compute-bound;
+weight-loading cost is now amortized across many more tokens per
+read, shrinking the bandwidth benefit, while the fp8-to-bf16 dequant
+step needed before each matmul (activations stay bf16 -- see the FP8
+flag entry above) is a fixed compute tax that does *not* shrink with
+batch size, and now lands on top of an already-saturated GPU. Net:
+a real slowdown once compute, not memory, is the bottleneck.
+**Why AWQ doesn't show the same divergence** is a real open question,
+not resolved here: one plausible reason is that vLLM's AWQ (int4)
+kernels are far more mature/optimized than the generic
+`fp8_per_tensor` weight-only path (AWQ is a widely-deployed, heavily
+optimized method; this specific FP8 shorthand is a newer, simpler
+recipe) -- if the FP8 dequant kernel is less fused/efficient, its
+fixed overhead could scale worse with batch size than AWQ's. This is
+a hypothesis, not a measured claim; confirming it would need a kernel-
+level profile (e.g. Nsight), which is out of scope here.
+
+**What this sweep's largest, most robust effect actually is --
+restructuring the story around it:** prefix caching, not
+quantization. fp16 with prefix caching on vs off at concurrency ~= 32
+(single runs, not yet repeat-validated the way the quantization
+comparison above is): TTFT p50 26.95ms vs 37.36ms (28% lower with
+caching on), p99 55.06ms vs 99.65ms (45% lower). Both gaps are many
+times larger than any quantization effect measured here, including
+the real ones (FP8's ~14% slowdown at high load). On a multi-turn
+conversational workload built from a small number of repeated
+prefixes, prefix caching is the first-order lever; quantization is
+second-order at this model size and these load levels. The README
+leads with this, not with quantization.
+**Not yet repeat-validated:** the prefix-caching effect size above is
+from the original single-run sweep, same limitation the AWQ crossover
+claim had before this correction. It's such a large gap (28/45%)
+relative to any noise band observed so far (a few percent) that it's
+very unlikely to be noise, but it hasn't been checked the same way
+the quantization comparison now has. Worth a repeat pass before
+leaning on the exact percentages in a final write-up, even though the
+direction and rough magnitude are not in doubt.
+
+**Scope of every claim above:** Qwen2.5-1.5B-Instruct, single H100
+80GB, concurrency approximately 1 and approximately 32 (not the full
+0-32 range), prefix caching off unless stated otherwise, vLLM 0.26.0.
+None of this generalizes to other model sizes, other hardware, or
+load levels between or beyond the two tested here without saying so.

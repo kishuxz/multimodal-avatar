@@ -3,9 +3,13 @@
 Measuring the latency of a real-time conversational AI avatar, and the
 cost of the tricks used to make it fast.
 
-Status: scaffold only. No benchmarks have been run yet — see
+Status: Phase 1 (LLM serving sweep) has produced results; the tables
+below are still TODO pending Phase 5's write-up pass. See
 `docs/decisions.md` for why every number in this README will come from a
-committed script, never a placeholder.
+committed script, never a placeholder, and for the full corrected
+findings in the meantime (the noise-band-validated quantization
+comparison, and why prefix caching, not quantization, is this sweep's
+largest effect).
 
 ## The question
 
@@ -25,8 +29,26 @@ TODO (Phase 4): stated precisely once Phase 1-3 results exist.
   container tag. Notably: `torch==2.11.0` (base image ships `2.8.0+cu128`;
   vLLM's dependency resolution upgrades it to CUDA 13.0), no `flash-attn`,
   `flashinfer-python==0.6.14` as the attention kernel backend.
-- Model: `Qwen/Qwen2.5-1.5B-Instruct`, plus AWQ-Int4 and FP8 variants.
-- Workload: see `harness.py` and `scripts/sweep.sh` once written.
+- Model: `Qwen/Qwen2.5-1.5B-Instruct`, plus `Qwen/Qwen2.5-1.5B-Instruct-AWQ`
+  and an on-the-fly FP8 variant (`--quantization fp8_per_tensor`).
+  **The FP8 arm is weight-only, static-scale, uncalibrated** -- weights
+  move to `torch.float8_e4m3fn`, activations stay in bf16. This is a
+  different intervention than the calibrated W8A8 (weights *and*
+  activations quantized, activation scales fit against a calibration
+  dataset) that most published FP8 checkpoints use; see
+  `docs/decisions.md` for how that was confirmed. Any FP8 number in this
+  README is about the weight-only arm specifically, not FP8 in general.
+- Workload: `harness.py` (open/closed-loop load, TTFT/ITL/E2E, barge-in).
+- Load design: **offered concurrency is held constant across arms, not
+  arrival rate.** Each arm's arrival rate is derived independently via
+  Little's Law (`scripts/calibrate.py`, measuring low-load service time
+  per arm) to target the same concurrency (~1/8/32) for every arm. See
+  `docs/decisions.md` for why this and not the reverse -- it's a
+  different experiment, and this is the one that ran.
+- `scripts/sweep.sh` orchestrates the full matrix: 3 arms x 3 load points
+  x 2 barge-in fractions x prefix-caching on/off (fp16 only) x one
+  closed-loop contrast run per arm, restarting the server cleanly and
+  confirming a cold cache between every configuration.
 
 ## Results
 
