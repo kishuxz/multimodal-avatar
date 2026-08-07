@@ -14,6 +14,14 @@ Every other repeat-covered column (p95, ITL, tokens/sec, errors) is
 aggregated from the 5 underlying per-seed run files the same way.
 Everywhere else, a cell is a single run and reported as one.
 
+Every results/*.json file must be either matched by a known filename
+pattern or explicitly named as intentionally excluded
+(assert_full_classification(), INTENTIONALLY_UNCLASSIFIED_PATTERNS) --
+this fails loudly on an unrecognized file rather than silently dropping
+it from every table and plot. A real naming mismatch did exactly that
+once (fp16_closed_c8.json, caught by eye, not by anything checking);
+this check exists so the next one doesn't need luck.
+
 Usage:
   python scripts/analyze.py
   (reads results/*.json, writes results/summary.md and plots/*.png)
@@ -47,6 +55,7 @@ REPEAT_SEED_RE = re.compile(
     r"^repeat_(?P<arm>fp16|awq|fp8)_c(?P<conc>\d+)_seed(?P<seed>\d+)\.json$"
 )
 REPEAT_SUMMARY_RE = re.compile(r"^repeat_(?P<arm>fp16|awq|fp8)_c(?P<conc>\d+)\.json$")
+CALIBRATION_RE = re.compile(r"^calibration_[A-Za-z0-9_]+\.json$")
 
 # filename arm token -> (canonical arm, prefix caching on/off). AWQ and FP8
 # only ever run with prefix caching off (docs/decisions.md: "prefix caching
@@ -140,6 +149,54 @@ def discover_repeat_summaries(results_dir):
         key = (m.group("arm"), int(m.group("conc")))
         out[key] = load_json(path)
     return out
+
+
+# Files matched here are real results/*.json files that deliberately don't
+# become a matrix cell -- named explicitly, with a reason, rather than
+# silently skipped. Add to this only with a comment saying why; anything
+# else that falls through assert_full_classification() below is a bug to
+# fix, not a file to add here.
+INTENTIONALLY_UNCLASSIFIED_PATTERNS = [
+    (CALIBRATION_RE, "calibration measurement / probe dump -- backs a "
+                      "derived rate or service time, not itself a cell"),
+]
+
+
+def assert_full_classification(results_dir):
+    """Every JSON under results/ must be accounted for: matched by one of
+    the cell-building regexes above, or explicitly named here as
+    intentionally not a cell. Raises (loudly, listing exactly which files)
+    if anything falls through neither.
+
+    Exists because this happened once already: fp16_closed_c8.json didn't
+    match the run regex (its filename skips the _pcoff/_pcon token every
+    other fp16 file carries), so it was silently absent from every table
+    and plot with no error -- caught only because the closed-loop table
+    visibly had 2 of 3 arms, not because anything was checking. This is
+    that check, so the next naming mismatch fails the run instead of
+    waiting to be noticed by eye."""
+    all_files = {os.path.basename(p) for p in glob.glob(os.path.join(results_dir, "*.json"))}
+    classified, explained = set(), set()
+
+    for name in all_files:
+        if RUN_RE.match(name) or REPEAT_SEED_RE.match(name) or REPEAT_SUMMARY_RE.match(name):
+            classified.add(name)
+            continue
+        for pattern, _reason in INTENTIONALLY_UNCLASSIFIED_PATTERNS:
+            if pattern.match(name):
+                explained.add(name)
+                break
+
+    unaccounted = sorted(all_files - classified - explained)
+    if unaccounted:
+        raise SystemExit(
+            "scripts/analyze.py: the following results/*.json files matched no "
+            "known pattern (run, repeat seed, repeat summary, calibration) and "
+            "aren't listed in INTENTIONALLY_UNCLASSIFIED_PATTERNS with a reason "
+            "-- fix the classifier regex or add an explicit entry, don't let "
+            "this pass silently:\n  " + "\n  ".join(unaccounted)
+        )
+    return classified, explained
 
 
 # --------------------------------------------------------------------------
@@ -570,6 +627,10 @@ def parse_args():
 def main():
     cfg = parse_args()
     os.makedirs(cfg.plots_dir, exist_ok=True)
+
+    classified, explained = assert_full_classification(cfg.results_dir)
+    print(f"file classification: {len(classified)} in the matrix, "
+          f"{len(explained)} intentionally excluded (calibration), 0 unaccounted")
 
     cells = build_cells(cfg.results_dir)
 

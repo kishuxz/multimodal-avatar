@@ -715,6 +715,98 @@ per arm from that arm's own service-time distribution, the same way
 `scripts/calibrate.py` already derives arrival rate per arm via Little's
 Law -- not attempted here, out of scope for this pass.
 
+## Hardware change: H100 80GB HBM3 -> H200 SXM 141GB (new pod)
+
+**Found:** the pod behind every Phase 1-3 result (`results/*.json`, all
+of `docs/decisions.md` above this entry, the whole Phase 5 write-up) was
+stopped and its H100 reclaimed. The replacement pod is different
+hardware, not a restart of the same one: `NVIDIA H200`, 143771 MiB
+(~141GB, vs the H100's 80GB), driver `570.124.06` (vs `580.126.09`),
+datacenter `US-NC-1` (vs `US-CA-2`), and a differently-provisioned
+`/workspace` (volume disk, not the `avatar-bench-vol` network volume) --
+confirmed empty on first login, so nothing carried over and the
+environment gets rebuilt from scratch, not resumed.
+**Why it matters:** every number in `results/*.json` and everything
+derived from them (`results/summary.md`, `plots/*.png`,
+`results/kv_cache_check.md`, and the corrected-findings section of this
+file) is scoped to the H100 80GB HBM3 that produced it. GPU model,
+memory capacity, and driver all differ on the new pod -- any of those
+alone would be enough to invalidate a direct comparison; here all three
+changed at once.
+**Chose:** state this plainly, in both this file and the README, before
+any new measurement runs -- not as a footnote on a table, as its own
+visible fact. **No table in this repo mixes H100 and H200 numbers.**
+Phase 1-3 gets fully re-run on the H200 (see the prediction entry
+immediately below for what's expected to change and why) rather than
+patched or extended in place.
+**How to apply:** any future hardware change gets the same treatment --
+recorded here before remeasuring, stated in the README's Setup section,
+and no silent mixing of tables across the boundary. If a reader only
+skims one number from this repo, which GPU produced it should never be
+something they have to dig for.
+
+## Predictions, stated before measuring (Phase 3 re-run on H200)
+
+The H100 run's central story (see "Predictions, stated before measuring
+(Phase 3 sweep)" above) was that Qwen2.5-1.5B on an 80GB card leaves
+almost no memory pressure for quantization to relieve -- weights are a
+few GB, KV cache has enormous headroom even unquantized, so any
+quantization benefit should show up only at high concurrency, if at
+all. The H200 has 140.4GB (143771 MiB reported by `nvidia-smi`), ~1.76x
+the H100's 80GB. That doesn't change the story; it makes the same
+argument stronger.
+
+**Predicted:** at `--gpu-memory-utilization 0.9`, the KV cache budget
+goes from ~72GB (H100) to ~126GB (H200) -- headroom the 1.5B model was
+already not using up on the H100. **AWQ and FP8 should have even less
+memory pressure to relieve on H200 than they did on H100**, not more --
+if anything, whatever high-concurrency benefit either arm showed on the
+H100 (FP8's real ~14% win at c~=32, in the direction bandwidth-bound
+weight-loading predicts) should show up at a *higher* concurrency on
+H200 than it did on H100, if it shows up in the 1/8/32 range tested
+here at all. A same-or-larger benefit at c~=32 would be the surprise,
+not the null result.
+
+**Predicted, AWQ specifically:** the dequant step (int4 -> bf16 per
+matmul) is a compute cost, not a memory-bandwidth cost. H200 is the
+same Hopper compute architecture as H100 SXM -- its headline change is
+memory (more capacity, ~1.4x more HBM bandwidth: HBM3e vs HBM3), not
+more FLOPs. So AWQ's fixed dequant overhead should cost roughly the
+same *absolute* time on H200 as it did on H100 (8.39ms fp16 vs 10.47ms
+AWQ, both at c~=1). If everything else gets faster from the extra
+bandwidth, that fixed cost becomes a *larger share* of AWQ's own total
+latency, not a smaller one -- AWQ's relative low-load penalty should
+hold or widen, not shrink.
+
+**Predicted, FP8 specifically:** the low-load FP8 win on H100 (8.23 vs
+8.39ms, marginal) was attributed to halving the bytes moved per forward
+pass while memory-bandwidth-bound at low batch size. More available
+bandwidth on H200 doesn't remove that halving, but it can shrink its
+*share* of total TTFT if other fixed overheads (kernel launch, Python/
+async overhead in the harness's own request path) don't shrink at the
+same rate -- so the low-load FP8 edge may be smaller in absolute ms, or
+harder to distinguish from noise, than the already-marginal H100 number
+was.
+
+**Predicted, and the reason this isn't just "H200 is faster so multiply
+by a constant":** concurrency ~=1/8/32 is derived per-arm from that
+arm's own H200 service time via `scripts/calibrate.py` (Little's Law),
+same procedure as the H100 run. If H200's extra bandwidth changes
+low-load service time by a different factor than it changes the
+compute-bound regime's onset, "concurrency ~= 32" on H200 is not
+guaranteed to land at the same point on the memory-bound-to-compute-
+bound curve that "concurrency ~= 32" landed at on H100 -- the label is
+portable, the physical regime it names might not be. If quantization
+effects at c~=32 look different in kind (not just degree) from the H100
+result, this is the first place to look before concluding the mechanism
+changed.
+
+**If the data contradicts any of this** -- AWQ or FP8 showing a larger
+benefit on H200 than H100 at the same nominal concurrency -- that's a
+more interesting result than confirmation would be, and gets written up
+as such rather than smoothed over, same standard as the H100 predictions
+above.
+
 ## FP8 on vLLM 0.19.1: not the same recipe as the H100's fp8_per_tensor
 
 **Predicted going in:** that it might differ -- the H100 FP8-flag entry
@@ -771,3 +863,92 @@ distinct from "weight-only, static scale" for the H100 arm -- not reuse
 the H100 arm's FP8 description. If a future vLLM version on either
 environment changes this again, re-verify the same way rather than
 assuming either recipe carries forward.
+## Sweep v2: four fixes folded into the design, not bolted on after
+
+Before any GPU time goes toward a re-run, `scripts/sweep.sh` and
+`scripts/analyze.py` get four changes -- each fixes something the H100
+sweep either got wrong or only fixed after the fact, and each is
+recorded here as a design change, not just a diff.
+
+**1. Scaled barge-in window, not a fixed 0.3-1.2s.**
+**Found:** in the H100 data, `aborted_total` is 0 for every concurrency
+1 and 8 `bargein0.25` run -- the fixed window never once fired before
+the request finished on its own at those load points. Only concurrency
+32 (where queueing pushed response time up near the fixed window)
+produced any aborts at all. The barge-in dimension of the entire H100
+sweep was effectively tested at one load point out of three.
+**Chose:** derive `--barge-in-min`/`--barge-in-max` per arm from that
+arm's own calibrated mean service time (`scripts/calibrate.py`'s
+concurrency=1 probe, already computed for the rate derivation) --
+25% to 75% of it, computed once per arm and applied at all three
+concurrencies. Early enough to reliably clear TTFT (a small fraction of
+total service time here), late enough to leave a real gap before
+natural completion.
+**Rejected:** recalibrating the window per load point (i.e. accounting
+for queueing-inflated response time at concurrency 32 specifically).
+**Why:** a single per-arm scale, from the same unqueued measurement
+`scripts/calibrate.py` already produces, is enough to fix the actual
+bug -- zero aborts at two of three load points -- without adding a
+second calibration pass. **Known limitation, stated rather than
+hidden:** at concurrency 32 the window is sized off unqueued service
+time, so it can land earlier in the request's actual (queued) lifetime
+than "mid-decode" -- it will still reliably fire and interrupt
+something in flight, just not necessarily at the same relative point in
+the response every time. See `scripts/sweep.sh`'s own comment for the
+exact fractions and reasoning.
+
+**2. Server startup log captured per run, committed.**
+**Found:** `scripts/sweep.sh` always `tee`'d each server's startup log
+to the pod's local disk and never copied it anywhere this repo tracks
+-- the KV-cache-size log line, resolved max model length, block size,
+and attention backend selection all existed only for the duration of
+that pod. This is what blocked `scripts/kv_cache_check.py` from having
+anything to verify against (see that entry above) and is issue #19.
+**Chose:** `start_server()` now copies the log to
+`results/server_log_${label}.txt` immediately after the server is
+confirmed ready and cold, before any load-test traffic -- a clean
+startup-only snapshot, committed alongside that arm's `results/*.json`.
+**Why now, not later:** confirmed directly (environment-rebuild PR) that
+vLLM 0.19.1 still prints `Available KV cache memory:` and
+`GPU KV cache size:` at startup, so this is a real capability, not a
+hope.
+
+**3. Repeats built into the matrix, not a separate manual pass.**
+**Found:** the H100 run's noise-band numbers (`scripts/repeat_check.py`,
+5 seeds at concurrency 1 and 32, prefix off, barge-in 0.0) came from a
+second, manual invocation after the main sweep had already run and been
+written up once with single-run numbers -- the original write-up
+initially called a 2.4% single-run AWQ/fp16 gap a "crossover" before
+the repeat pass showed it was noise (see "Corrected results" above).
+That mistake was possible specifically because repeats weren't part of
+the same pass that produced the single-run numbers in the first place.
+**Chose:** `run_open_loop_matrix()` now calls `scripts/repeat_check.py`
+directly, inline, for exactly the cells that were manually repeated
+before (concurrency 1 and 32, prefix off, barge-in 0.0) -- same scope,
+same script, just invoked automatically instead of as a follow-up step
+someone has to remember to run. Non-repeat cells (concurrency 8,
+barge-in 0.25, prefix-on) are unchanged, single-run.
+**Rejected:** repeating every cell. 5x the GPU time for load points the
+quantization comparison's noise band doesn't actually hinge on --
+scope stays what it was, just automatic now.
+**4. File-classification assertion in `scripts/analyze.py`.**
+**Found:** `fp16_closed_c8.json` didn't match the run-file regex (its
+name skips the `_pcoff`/`_pcon` token every other fp16 file has), so it
+was silently absent from every table and plot the first time
+`scripts/analyze.py` ran. Caught only because the closed-loop table
+visibly had 2 of 3 arms and that looked wrong by eye -- nothing in the
+script itself would have flagged it if the gap had been less visually
+obvious (e.g. a missing single cell in a 60-row table).
+**Chose:** `assert_full_classification()` globs every `results/*.json`
+file and requires each one to either match a known pattern (run, repeat
+seed, repeat summary, calibration) or appear in
+`INTENTIONALLY_UNCLASSIFIED_PATTERNS` with a stated reason. Anything
+left over raises, listing exactly which files, before any table or plot
+gets built. Verified both directions: passes clean against the full
+H100 `results/` directory (63 classified, 8 calibration files
+explicitly excluded, 0 unaccounted), and fails loudly with the
+offending filename when a deliberately unrecognized file is dropped in.
+**Why:** the original bug was caught by luck (a visually obvious 2-of-3
+gap). The next naming mismatch might not be as visible -- a single
+missing repeat seed, a missing row in a 60-row table -- and shouldn't
+need to be.

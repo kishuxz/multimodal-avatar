@@ -13,11 +13,29 @@ repeat-validating the prefix-caching number -- GPU required), Phase 6
 pass), Phase 8 (go public). See `docs/decisions.md` for the full
 narrative and every non-obvious call made along the way.
 
+## Hardware change: the pod behind every number below is gone
+
+Every result in `results/*.json`, and everything derived from it in this
+README and in `docs/decisions.md`, was measured on a RunPod H100 80GB
+HBM3. That pod was stopped and reclaimed. Its replacement is a
+different GPU -- H200 SXM 141GB, different driver, different
+datacenter -- not a restart of the same one. **Nothing below this point
+is comparable to a number measured on the new pod, and nothing in this
+repo mixes the two.** Phase 1-3 gets fully re-run on the new hardware
+rather than extended in place; see `docs/decisions.md` for the full
+entry and the predictions stated before that re-run.
+
 ## The question
 
 TODO (Phase 4): stated precisely once Phase 1-3 results exist.
 
 ## Setup
+
+**Everything in this section describes the Phase 1-3 (H100) environment
+that produced the results below.** It's superseded, not current -- see
+"Hardware change" above. Left as-is rather than rewritten in place, so
+the results below stay traceable to the setup that actually produced
+them; the re-run's environment gets its own entry once it exists.
 
 - Hardware: RunPod, single H100 80GB HBM3. Driver `580.126.09`, host CUDA 13.0.
 - Container: `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` -- a starting
@@ -144,11 +162,12 @@ with/without comparison the plot makes is unaffected; see
   0-32 range), prefix caching off unless stated otherwise. None of it
   generalizes to other model sizes, other hardware, or load levels
   between or beyond the three tested here without saying so.
-- **Hardware-locked:** if a future run ends up on different silicon
-  than the H100 80GB HBM3 above -- a different GPU model, a different
-  memory configuration -- these results are not comparable to it. Phase
-  3 would need to be re-run on the new hardware rather than mixed with
-  what's here.
+- **Hardware-locked, and this already happened once:** this section
+  originally stated as a hypothetical that a future run on different
+  silicon wouldn't be comparable to these results. It's no longer
+  hypothetical -- the H100 pod is gone, its replacement is an H200, and
+  Phase 1-3 is being re-run rather than extended. See "Hardware change"
+  near the top of this file.
 - The prefix-caching effect (this sweep's largest finding) is single-run,
   not yet repeat-validated the way the quantization comparison is.
 - The KV cache arithmetic check (`scripts/kv_cache_check.py`,
@@ -161,11 +180,14 @@ with/without comparison the plot makes is unaffected; see
 
 ## What's next
 
+- Immediate: Phase 1-3 re-run on the new H200 pod (see "Hardware
+  change" above) -- environment rebuild first, then the sweep, improved
+  rather than repeated as-is (scaled barge-in window, server startup
+  logs captured per run, repeats built into the matrix, stricter
+  file-classification in `scripts/analyze.py`).
 - Phase 4 (GPU required): perplexity across arms, with its own noise
   band; repeat-validate the prefix-caching number the same way
   quantization was.
 - Phase 6 (GPU required): diffusion frame budget.
 - Phase 7: final README pass once Phase 4/6 land.
 - Phase 8: go public, update resume.
-- Blocked right now: no H100 available in RunPod's US-CA-2 region as of
-  writing; Phase 4/6 wait on capacity.
