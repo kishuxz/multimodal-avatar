@@ -1579,3 +1579,192 @@ correctly-ignorable fixed cost, contradicting the prediction. The
 committed measurement (`scripts/diffusion_bench.py`, repeats +
 `torch.cuda.synchronize()` around every stage, `results/h200/diffusion/`)
 is what actually decides this, not the pilot -- report below.
+
+## Phase 6 results: the fixed cost, not the ceiling, is the finding
+
+512x512, fp16, DPM-Solver++, 5 repeats per cell, warmup discarded
+(`results/h200/diffusion/steps{1,2,3,4,5,8,12,20}.json`):
+
+| Steps | cond (ms) | step mean (ms) | VAE decode (ms) | total (ms) | total sd |
+|---|---|---|---|---|---|
+| 1 | 6.61 | 18.74 | 20.98 | 46.33 | 0.82 |
+| 2 | 6.62 | 18.65 | 20.96 | 64.88 | 0.42 |
+| 3 | 6.52 | 18.98 | 20.97 | 84.42 | 2.65 |
+| 4 | 6.48 | 18.35 | 21.00 | 100.89 | 0.61 |
+| 5 | 6.99 | 20.88 | 21.03 | 132.42 | 1.59 |
+| 8 | 6.47 | 18.27 | 21.01 | 173.63 | 0.33 |
+| 12 | 6.38 | 17.87 | 21.00 | 241.76 | 0.36 |
+| 20 | 6.56 | 18.17 | 21.02 | 390.99 | 1.57 |
+
+**The finding is not "how many steps fit" -- it's that most of the
+budget is gone before the first step runs.** Mean conditioning (6.58ms)
++ mean VAE decode (20.996ms) across all eight cells = **27.57ms fixed
+cost, 68.9% of the 40ms/frame real-time budget, that no step-count
+choice touches.** Step count is the lever the field's own optimization
+literature focuses on (this is exactly why DeepCache/TeaCache-style
+methods target the denoising loop specifically) -- at this resolution,
+it is not the binding constraint. A hypothetical zero-step model (pure
+noise passed straight to the VAE, not a real generation) would still
+cost 27.57ms and consume 69% of the budget. **Optimizing step count
+alone cannot make this fit 40ms; the fixed cost has to be the target,
+not the loop.**
+
+**The ceiling, reported because the prompt asked for it, secondary to
+the point above:** no step count fits 40ms -- even 1 step (46.33ms)
+misses by a wide-enough margin (6ms, several times the ±0.82ms noise
+band) that this isn't a borderline case. 3 steps fits 100ms (84.42ms,
+comfortably inside the ±2.65ms band); 4 narrowly misses (100.89ms,
+outside 100ms by more than its own ±0.61ms noise band, so not noise).
+
+**Against the pre-registered hypothesis (above): held, more strongly
+than predicted.** VAE decode (~21.0ms) isn't just "comparable to" one
+denoising step (~18-19ms) -- it's slightly *larger*. At N=1, VAE decode
+alone is 45% of total frame time. The falsification condition (VAE
+decode at 10-20% or less of one step, at any step count) is not close
+to true anywhere in this table.
+
+**Resolution-specific, stated plainly:** VAE decode cost scales with
+output resolution (more pixels to decode); the 27.57ms / 68.9% figures
+above are for 512x512 specifically, not a property of diffusion models
+in general. A higher-resolution target would very likely make this
+finding *more* true (VAE decode grows, conditioning stays roughly
+fixed), not less -- but that's not measured here, and the numbers above
+should not be read as resolution-independent.
+
+## Phase 6: LPIPS ranked the more-degraded image as closer to baseline
+
+The single most useful methodological result in this repo, not because
+the metric is unusual (LPIPS is the standard choice -- the same family
+DeepCache's and TeaCache's own papers use for exactly this comparison)
+but because trusting it alone here would have produced the wrong
+conclusion, silently.
+
+`scripts/diffusion_quality_check.py` computed LPIPS distance between a
+DeepCache-enabled frame and the same seed/steps generated with the
+cache disabled, at two step counts (`results/h200/diffusion/
+quality_steps4_lpips.json`, `quality_steps20_lpips.json`):
+
+| Steps | LPIPS distance |
+|---|---|
+| 4 | 0.4801 |
+| 20 | 0.6776 |
+
+Read only as numbers, this says steps=4's cached output is *closer* to
+its non-cached baseline than steps=20's is -- caching costs less
+quality at the step count nearest the real budget than at the "quality"
+step count. **That reading is backwards.** The images, pulled and
+looked at before writing anything down (`results/h200/diffusion/
+quality_steps{4,20}_{nocache,deepcache}.png`):
+
+![steps=4, no cache](../results/h200/diffusion/quality_steps4_nocache.png)
+![steps=4, DeepCache](../results/h200/diffusion/quality_steps4_deepcache.png)
+![steps=20, no cache](../results/h200/diffusion/quality_steps20_nocache.png)
+![steps=20, DeepCache](../results/h200/diffusion/quality_steps20_deepcache.png)
+
+At steps=20, DeepCache changes the *composition* -- the non-cached
+frame is a sharp, full-face portrait; the cached frame at the same
+seed is a sharp close-up of an entirely different facial region. Both
+images are individually coherent and detailed; they just aren't the
+same picture. At steps=4, the non-cached frame is already low-detail
+(4 steps from pure noise is close to the lower edge of what this
+scheduler can render *at all*), and the cached frame at steps=4 has
+lost nearly all remaining structure -- a soft, largely-featureless
+blur. The steps=4 pair looks *more* alike only in the sense that two
+blurry things resemble each other more than two sharp, different
+things do.
+
+**Mechanism:** LPIPS (like most learned perceptual metrics) scores
+distance in a deep feature space tuned to detect texture- and
+edge-level differences. Two low-detail images produce weak activations
+in comparable regions of that feature space almost regardless of their
+content, because there isn't much texture or edge structure in either
+one to disagree about -- the metric reads "both are soft" as "these are
+similar." Two sharp, structurally different images produce strong,
+different activations, which the metric correctly reads as "these are
+different" -- even though, for this project's purposes (does caching
+preserve the intended output at a given step count), the steps=20 pair
+is arguably the *less* concerning case: it's a wrong picture, not a
+degraded one, at a step count nobody would actually ship at 25fps
+anyway. The steps=4 pair is the one that matters, and LPIPS ranked it
+as the *better*-preserved result.
+
+**Stated plainly, because this is the point of writing the entry at
+all: read as a standalone number, LPIPS would have supported exactly
+the wrong conclusion here -- that DeepCache's quality cost is smaller
+in the low-step regime the real-time budget actually forces, when the
+opposite is true. The only reason this didn't ship as a finding is that
+the images were pulled and looked at before the number was trusted.**
+A metric was checked against ground truth (the actual pixels) rather
+than reported on its own authority -- the same discipline this repo has
+applied to every other number that turned out to need it (FP8's
+sample text alongside its `finish_reason` counts; the actual decoded
+tokens behind AWQ's perplexity delta).
+**How to apply:** any future quality-cost claim in this repo that
+relies on a learned perceptual metric gets a visual spot-check before
+being trusted standalone, every time, not just when the number looks
+surprising -- this is exactly the kind of failure that looks
+unsurprising until someone looks.
+
+## Phase 6: DeepCache, honestly scoped
+
+`scripts/diffusion_sweep.sh`, `--cache-interval 5 --cache-branch 0`
+(the DeepCache paper's commonly-cited SD1.5 default; not tuned per
+step count -- see Limitations), 5 repeats per cell:
+
+| Steps | total, no cache (ms) | total, DeepCache (ms) | speedup |
+|---|---|---|---|
+| 1 | 46.33 | 49.27 | **0.94x (slower)** |
+| 2 | 64.88 | 49.41 | 1.31x |
+| 3 | 84.42 | 50.71 | 1.66x |
+| 4 | 100.89 | 52.04 | 1.94x |
+| 5 | 132.42 | 54.57 | 2.43x |
+| 8 | 173.63 | 79.83 | 2.18x |
+| 12 | 241.76 | 105.27 | 2.30x |
+| 20 | 390.99 | 138.75 | **2.82x** |
+
+**Headline speedup (2.82x at steps=20) and the honest scope of it: at
+the one step count (N=1) closest to the model actually meeting the
+40ms budget, DeepCache is *slower*, not faster.** With `cache_interval
+= 5` and only one step total, there is no later step to reuse a cached
+computation from -- the caching machinery adds bookkeeping overhead
+(a wrapped `unet.forward`, cache-hit checks on every block) with zero
+opportunity to skip anything, a pure cost with no offsetting benefit.
+Speedup only becomes clearly positive at N>=2 and only becomes large at
+N>=5 -- past the point (N=3, see above) that fits even the loose 100ms
+reference budget. **The standard acceleration technique for this class
+of model provides its largest benefit in exactly the step-count regime
+a real-time avatar's own budget rules out, and provides no benefit --
+a regression -- in the regime the budget actually forces.**
+
+**The speedup curve is not smooth, and that's a real, explicable
+pattern, not noise:** 2.43x at N=5 vs. 2.18x at N=8 is a dip, not
+monotonic growth, despite N=8 being deeper into "more steps means more
+caching opportunity" territory. `cache_interval=5` means one step in
+every five is "real" (full computation); how large a fraction of a
+given N is real depends on N mod 5, not on N being larger. N=5: 1 real
+step out of 5 (20%). N=8: 2 real steps out of 8 (steps 0 and 5 -- 25%).
+A larger real-step fraction means less caching, means less speedup --
+so N=8 having *more* real-step fraction than N=5 correctly predicts
+N=8's *smaller* speedup, a sawtooth pattern following N mod
+`cache_interval`, not a smooth function of N. Noise bands on every
+cell above are small relative to this gap (largest total-time stdev in
+either table is 3.27ms, at N=1 DeepCache, against gaps of tens of ms)
+-- confirmed real, not confirmed by repeats alone, by having a
+mechanism that predicts the direction of the dip in advance of reading
+the numbers a second time.
+
+**Quality cost:** see the LPIPS entry above -- severe at both step
+counts checked (steps=4, closest to the real budget: near-total loss
+of structure; steps=20, the "quality" regime: a different image, not a
+degraded one). Not measured at every step count in the speedup table --
+two points, chosen at the two ends of what's relevant here (the
+budget-forced regime and the quality-focused regime), not a claim that
+quality cost is characterized everywhere on this curve.
+**Not tuned:** one fixed `(cache_interval, cache_branch)` setting was
+used throughout, matching the project's own standing rule against
+turning a knob and calling it optimization (the same reasoning that
+kept this phase from being a step-count sweep in the first place -- see
+the prompt this phase started from). A smaller interval might trade
+back some of N=1-4's regression for a smaller quality cost at those
+step counts; untested, a real limitation, not investigated further
+here.

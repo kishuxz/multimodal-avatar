@@ -1,21 +1,30 @@
 # avatar-inference-bench
 
-A latency and quality benchmark for the LLM-serving backend of a
-real-time conversational avatar: vLLM-served Qwen2.5-1.5B-Instruct under
-realistic open-loop load, across quantization arms, paired with a
-perplexity check for what each arm costs in output quality. It covers
-the language-model serving layer only -- not rendering, diffusion, or
-any other part of an avatar pipeline; see "Limitations," below.
+A latency and quality benchmark for a real-time conversational avatar's
+two costliest components: the LLM-serving backend (vLLM-served
+Qwen2.5-1.5B-Instruct under open-loop load, across quantization arms,
+paired with a perplexity check for output quality) and the
+diffusion-based frame renderer's per-frame cost (Stable Diffusion 1.5,
+staged and timed against a 25fps/40ms real-time budget). Two separate
+environments and workloads, each scoped to its own section below --
+nothing here compares one against the other.
 
-**The largest lever in this sweep is prefix caching, not quantization** --
-several times larger than any quantization effect measured, repeat-validated
-at the load point that matters most. **AWQ (int4) trades an ~8% perplexity
-cost for a 21.6% faster TTFT p50 at high concurrency, but is worse on
-both latency and quality at low concurrency -- never the right choice
-there.** **FP8 is excluded:** vLLM 0.19.1's online W8A8 path emits
-corrupted, incoherent output instead of degraded-but-readable text -- a
-serving-stack defect (issue #29), not a property of FP8 quantization as
-a technique.
+**LLM serving -- the largest lever is prefix caching, not
+quantization**, several times larger than any quantization effect
+measured, repeat-validated at the load point that matters most. **AWQ
+(int4) trades an ~8% perplexity cost for a 21.6% faster TTFT p50 at high
+concurrency, but is worse on both latency and quality at low
+concurrency** -- never the right choice there. **FP8 is excluded:**
+vLLM 0.19.1's online W8A8 path emits corrupted output, a serving-stack
+defect (issue #29), not a property of the technique.
+
+**Diffusion -- the binding constraint at 512x512 is fixed cost, not
+step count:** conditioning + VAE decode alone is 27.6ms, 69% of a 40ms
+real-time frame budget, before any denoising step runs -- the field's
+usual lever (fewer steps) can't touch that. DeepCache, the one
+optimization tried, speeds up the high-step regime up to 2.82x but is
+*slower* at the step count nearest the real budget, with severe quality
+loss at both ends.
 
 ![Prefix caching effect](plots/h200/prefix_caching_effect.png)
 ![Effect size comparison](plots/h200/effect_size_comparison.png)
@@ -405,6 +414,141 @@ number with an H200 quality number.
 Full H100 narrative, tables, and plots as originally written:
 `results/summary.md`, `docs/decisions.md`.
 
+## Diffusion frame budget (Phase 6)
+
+**A different environment and a different workload from everything
+above -- no vLLM, no server, plain `diffusers` on the same H200 pod.**
+Stable Diffusion 1.5, fp16, DPM-Solver++, 512x512 (SD1.5's native
+resolution). A proxy for a real-time avatar's frame renderer, not the
+thing itself: no lip-sync, no audio conditioning, no temporal
+consistency across frames, no actual avatar-specific model -- a
+standard text-to-image diffusion model's per-frame cost structure,
+measured against the budget a real system would face. Data:
+`results/h200/diffusion/`, model choice and pre-registered hypothesis
+in `docs/decisions.md`.
+
+**512x512 real-time video is ~25fps, a 40ms/frame budget. Every stage
+below is timed separately with `torch.cuda.synchronize()` bracketing
+it, one warmup generation discarded first -- an unsynchronized or
+unwarmed timing reads 100-300ms of pure CUDA/cuDNN warmup as if it were
+real cost; see `docs/decisions.md` for the before/after numbers that
+caught this.**
+
+### The fixed cost, not the ceiling, is the finding
+
+| Steps | conditioning (ms) | one denoising step (ms) | VAE decode (ms) | total (ms) |
+|---|---|---|---|---|
+| 1 | 6.61 | 18.74 | 20.98 | 46.33 |
+| 4 | 6.48 | 18.35 | 21.00 | 100.89 |
+| 20 | 6.56 | 18.17 | 21.02 | 390.99 |
+
+(5 repeats per cell, full table across 8 step counts in
+`docs/decisions.md`; noise bands mostly under 3% of the mean --
+compute-bound GPU work, not a queued serving system.)
+
+**Mean conditioning (6.58ms) + mean VAE decode (21.00ms) = 27.57ms of
+fixed cost, 68.9% of the 40ms budget, before a single denoising step
+runs.** Step count -- the lever the field's own acceleration methods
+(DeepCache, TeaCache) are built around -- is not the binding constraint
+at this resolution: a hypothetical zero-step model would still cost
+27.57ms and still consume 69% of the budget. **The number worth
+optimizing is the fixed cost, not the step count.** (This is
+resolution-specific -- VAE decode cost scales with output resolution,
+so 68.9% is a 512x512 number, not a general one; see Limitations.)
+
+The ceiling itself, secondary to the point above but part of what was
+asked: no step count fits 40ms, not even 1 (46.33ms, several times
+outside the noise band). 3 steps fits the looser 100ms reference point
+(84.42ms); 4 narrowly misses it (100.89ms).
+
+**Pre-registered before this measurement ran (`docs/decisions.md`):
+VAE decode should be comparable in magnitude to one denoising step, not
+a rounding error, since both are single fixed-cost forward passes
+through comparably-sized networks. Held, more strongly than
+predicted** -- VAE decode (~21.0ms) is slightly *larger* than one step
+(~18-19ms), and at 1 step it's 45% of total frame time on its own.
+
+### LPIPS ranked the more-degraded image as closer to baseline
+
+The most useful methodological result in this repo, not because the
+metric is unusual (LPIPS is the standard choice for this exact
+comparison -- the same family DeepCache's and TeaCache's own papers
+use) but because trusting it alone here would have shipped the wrong
+conclusion.
+
+| Steps | LPIPS distance (DeepCache vs. no-cache, same seed) |
+|---|---|
+| 4 | 0.4801 |
+| 20 | 0.6776 |
+
+Read as numbers alone: caching costs *less* quality at steps=4 (nearest
+the real budget) than at steps=20. **That's backwards.**
+
+| | no cache | DeepCache |
+|---|---|---|
+| steps=4 | ![steps=4, no cache](results/h200/diffusion/quality_steps4_nocache.png) | ![steps=4, DeepCache](results/h200/diffusion/quality_steps4_deepcache.png) |
+| steps=20 | ![steps=20, no cache](results/h200/diffusion/quality_steps20_nocache.png) | ![steps=20, DeepCache](results/h200/diffusion/quality_steps20_deepcache.png) |
+
+At steps=20, DeepCache changes the *composition* -- both frames are
+sharp and detailed, but they're different pictures (a full-face
+portrait vs. a close-up of a different facial region), same seed. At
+steps=4, DeepCache doesn't change the composition so much as erase it
+-- an already low-detail non-cached frame becomes a near-featureless
+blur. **The steps=4 pair looks more "similar" to LPIPS only because two
+blurry images resemble each other more than two sharp, different ones
+do** -- the metric reads texture/edge agreement, and there's little
+texture in either steps=4 frame to disagree about. For this project's
+actual question (does caching preserve the output at the step count
+that matters), steps=4 is the worse failure, and LPIPS ranked it
+better.
+
+**Stated plainly: read on its own, LPIPS would have supported exactly
+the wrong conclusion -- that DeepCache's quality cost shrinks in the
+low-step regime the real-time budget forces, when the opposite is
+true. The only reason this didn't ship as a finding is that the images
+were pulled and looked at before the number was trusted.** Full
+mechanism discussion: `docs/decisions.md`.
+
+### DeepCache, honestly scoped
+
+| Steps | no cache (ms) | DeepCache (ms) | speedup |
+|---|---|---|---|
+| 1 | 46.33 | 49.27 | **0.94x (slower)** |
+| 4 | 100.89 | 52.04 | 1.94x |
+| 20 | 390.99 | 138.75 | **2.82x** |
+
+(`--cache-interval 5 --cache-branch 0`, the DeepCache paper's
+commonly-cited SD1.5 default -- one fixed setting, not tuned per step
+count; full 8-point table in `docs/decisions.md`.)
+
+**The headline number (2.82x at steps=20) and its honest scope: at the
+one step count closest to the model actually meeting the real-time
+budget, DeepCache is slower, not faster.** At N=1 there's no later step
+to reuse a cached computation from, so the caching machinery is pure
+overhead with no offsetting benefit. Speedup only turns clearly
+positive at N>=2 and only gets large at N>=5 -- past the point (N=3)
+that fits even the loose 100ms reference budget. **The standard
+acceleration technique for this class of model gives its largest
+benefit exactly where a real-time avatar's own budget rules step count
+out, and gives a regression where the budget actually forces it.**
+
+Paired with the quality-cost section above: severe quality loss at
+both step counts checked, worst at the step count nearest the real
+budget -- DeepCache is not a way around the fixed-cost finding at the
+top of this section, at any step count tested.
+
+**The speedup curve isn't smooth, and that's explicable, not noise:**
+2.43x at N=5 drops to 2.18x at N=8, despite N=8 having more steps.
+`cache_interval=5` means 1 step in every 5 is "real" (full
+computation); what fraction of a given N is real depends on N mod 5,
+not on N being larger. N=5: 1 of 5 steps real (20%). N=8: 2 of 8 steps
+real (steps 0 and 5 -- 25%). A larger real-step fraction means less
+caching and less speedup, so N=8's smaller speedup is predicted by this
+mechanism in advance, not just observed after the fact -- a sawtooth
+following N mod `cache_interval`, not measurement noise (largest total-
+time stdev across every cell in this section is 3.27ms, at N=1
+DeepCache, against gaps of tens of ms between adjacent step counts).
+
 ## Reproduction
 
 Every number above comes from a committed script reading committed
@@ -480,6 +624,18 @@ pip install pyarrow transformers huggingface_hub   # not in requirements.txt, se
 make perplexity-slices
 ```
 
+### Diffusion frame budget (no vLLM, no server -- any CUDA GPU)
+
+`requirements-pod-diffusion.txt` layers on top of a normal CUDA/torch
+install -- deliberately does not need `requirements-pod-h200.txt`'s
+CUDA-12.8 pin, since this phase runs with vLLM out of the picture:
+
+```bash
+pip install -r requirements-pod-diffusion.txt
+make diffusion          # step-count sweep, with and without DeepCache -> results/h200/diffusion/
+make diffusion-quality  # LPIPS between a DeepCache frame and its non-cached baseline
+```
+
 ### What's not reproducible
 
 - The H100 sweep: pod reclaimed, no live environment to re-run against.
@@ -493,11 +649,15 @@ make perplexity-slices
 
 ## Limitations
 
-- **Scope: LLM serving only.** This benchmarks the language-model
-  serving backend of a conversational avatar -- TTFT, ITL, quantization,
-  and output quality under load. It does not measure rendering,
-  diffusion, audio, or any other part of an avatar pipeline; no such
-  component was built or benchmarked here.
+- **Scope: LLM serving latency/quality, and diffusion per-frame cost --
+  not an avatar system.** This benchmarks the language-model serving
+  backend (TTFT, ITL, quantization, output quality under load) and a
+  diffusion model's per-frame stage cost against a real-time budget. It
+  does not measure audio, lip-sync, temporal consistency across frames,
+  or any actual avatar-specific model, and it does not connect the two
+  workloads' numbers -- no combined "avatar frame budget" is computed
+  anywhere in this repo. No avatar system was built or benchmarked
+  here, in whole or in part.
 - **Prefix caching's effect is a best case.** The workload is 8 fixed,
   byte-identical conversations, repeated -- exactly what prefix caching
   is designed to exploit. A production workload with a long tail of
@@ -539,3 +699,22 @@ make perplexity-slices
   repeat-validated the way the rest of the AWQ/prefix-caching comparison
   is (Findings, #1) -- the direction and rough magnitude aren't in
   doubt, but the exact percentage could move somewhat on a repeat pass.
+- **Diffusion: one model, one resolution, one caching method.** Stable
+  Diffusion 1.5 at 512x512 only -- no SDXL, no video-native model, no
+  other resolution tested. The fixed-cost finding (conditioning + VAE
+  decode = 69% of the 40ms budget) is resolution-specific: VAE decode
+  cost scales with output resolution, so that percentage would very
+  likely be different (plausibly worse, since VAE cost grows while
+  conditioning stays roughly fixed) at a higher resolution, untested.
+  DeepCache is the only optimization tried, at one fixed hyperparameter
+  setting (`cache_interval=5`, not tuned per step count) -- TeaCache and
+  other caching methods, and other DeepCache settings, are untested.
+- **Diffusion quality cost: LPIPS plus eyeballing two image pairs, not
+  a validated perceptual study.** The LPIPS-vs-visual-inspection
+  mismatch (Diffusion section, above) is the reason a single learned
+  metric isn't trusted alone anywhere in this repo -- but the visual
+  check itself is one person looking at two pairs of images, not a
+  human-rated study with any statistical power. "DeepCache's quality
+  cost is severe at steps=4 and steps=20" is a real, visually-confirmed
+  finding; "exactly how severe, in a way that generalizes" is not
+  established by two image pairs.
