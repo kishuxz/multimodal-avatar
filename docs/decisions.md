@@ -171,6 +171,37 @@ repo's short history -- verify the resulting merge commit's raw
 (`gh api repos/.../commits --jq '.[0].commit'`), not the GitHub-resolved
 `.author.login`, since that field is what actually lands in git history.
 
+**Correction, found during the Phase 7 public-readiness pass -- the
+paragraph above was wrong about what the rewrite fixes:** "verify the
+resulting merge commit... immediately after every merge" checks
+whatever `main`'s tip looks like at that moment. It does not check, and
+cannot fix, what a *pull request's own merge-commit record* shows --
+those are two different things. Confirmed directly: `gh pr view <10|11|12>
+--json mergeCommit` still returns `bfe2170`/`861f2ac`/`122662e` as each
+PR's recorded merge commit, and `gh api repos/.../commits/<sha> --jq
+'.commit.author'` on those exact SHAs still returns `kishore-crux
+<kishore@livingforeverai.com>` -- live, on GitHub, right now, not a
+stale local artifact. The rewrite-plus-force-push done three times
+*did* work, and worked completely, for its actual target: `main`'s
+current tip carries the correct identity all the way through, verified
+the same way originally described. What it structurally cannot touch is
+a PR's own merge-commit metadata, which GitHub treats as permanent the
+moment a PR is merged -- rewriting the branch that fed it, or the
+`main` it landed on, doesn't retroactively edit that record, and GitHub
+provides no self-service way to. **Decision, not an oversight:** accept
+this rather than recreate the repo a second time (the fix used for the
+*original* pre-this-repo authorship problem, `docs/decisions.md`,
+"Repo history recreated from a single commit"). Three PRs out of 34
+carrying a former, identifiably-mine work account is a smaller cost
+than discarding the visible process history this repo's whole
+credibility argument rests on. If this repo is ever recreated for an
+unrelated reason, this is resolved as a side effect; it does not justify
+recreating the repo on its own.
+**How to apply:** the pre-push hook and the "verify main's tip" habit
+both still matter and both still work -- they're just answering "is
+`main` clean," not "is every PR's own metadata clean." Those are
+different guarantees; don't conflate them again.
+
 ## Provenance wired into harness.py (issue #15)
 
 **Chose:** `harness.py`'s `main()` calls `bench.provenance.capture()` and
