@@ -1,7 +1,7 @@
 """
 Phase 5: reads results/*.json committed by the Phase 1-3 sweep (and its
 calibration/repeat passes) and emits the arm x load x barge-in x
-prefix-caching matrix as markdown, plus five plots. Nothing here talks to
+prefix-caching matrix as markdown, plus six plots. Nothing here talks to
 a server -- every number traces back to a JSON file already in this repo,
 which is the point of this phase: it runs with no GPU and no pod.
 
@@ -454,6 +454,47 @@ def plot_itl_abort_windows(results_dir, out_path):
     plt.close(fig)
 
 
+def plot_effect_size_comparison(cells, out_path):
+    # The other plots each make one comparison in isolation (fp16 on vs
+    # off; the arrival-rate curve). Neither puts prefix caching's effect
+    # size in the same frame as quantization's, so "prefix caching is the
+    # largest lever" -- the headline claim -- isn't visually provable from
+    # either alone; a reader has to cross-reference the table. This plot
+    # exists only to make that one comparison legible from a single image.
+    baseline = cells.get(("fp16", False, "open", 32, 0.0))
+    levers = [
+        ("prefix caching\n(fp16 on vs off)", cells.get(("fp16", True, "open", 32, 0.0))),
+        ("AWQ\n(vs fp16)", cells.get(("awq", False, "open", 32, 0.0))),
+        ("FP8\n(vs fp16)", cells.get(("fp8", False, "open", 32, 0.0))),
+    ]
+    fig, ax = plt.subplots(figsize=(7, 5))
+    labels = [l for l, c in levers if c]
+    p50_deltas = [(c["ttft_p50_ms"][0] - baseline["ttft_p50_ms"][0]) / baseline["ttft_p50_ms"][0] * 100
+                  for l, c in levers if c]
+    p99_deltas = [(c["ttft_p99_ms"][0] - baseline["ttft_p99_ms"][0]) / baseline["ttft_p99_ms"][0] * 100
+                  for l, c in levers if c]
+    x = range(len(labels))
+    width = 0.35
+    ax.bar([i - width / 2 for i in x], p50_deltas, width, label="TTFT p50")
+    ax.bar([i + width / 2 for i in x], p99_deltas, width, label="TTFT p99")
+    for i, (p50, p99) in enumerate(zip(p50_deltas, p99_deltas)):
+        ax.annotate(f"{p50:+.0f}%", (i - width / 2, p50), ha="center",
+                     va="bottom" if p50 >= 0 else "top", fontsize=8)
+        ax.annotate(f"{p99:+.0f}%", (i + width / 2, p99), ha="center",
+                     va="bottom" if p99 >= 0 else "top", fontsize=8)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("Change vs fp16, prefix caching off (%)")
+    ax.set_title("Effect size at concurrency ≈ 32: prefix caching vs quantization\n"
+                  "(prefix caching single-run; AWQ/FP8 repeat-validated)", fontsize=11)
+    ax.legend()
+    ax.grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def plot_open_vs_closed(cells, out_path):
     arms = ["fp16", "awq", "fp8"]
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
@@ -506,6 +547,7 @@ def main():
 
     plot_ttft_vs_arrival_rate(cells, os.path.join(cfg.plots_dir, "ttft_vs_arrival_rate.png"))
     plot_prefix_caching_effect(cells, os.path.join(cfg.plots_dir, "prefix_caching_effect.png"))
+    plot_effect_size_comparison(cells, os.path.join(cfg.plots_dir, "effect_size_comparison.png"))
     plot_ttft_distribution_per_arm(cfg.results_dir, os.path.join(cfg.plots_dir, "ttft_distribution_per_arm.png"))
     plot_itl_abort_windows(cfg.results_dir, os.path.join(cfg.plots_dir, "itl_abort_windows.png"))
     plot_open_vs_closed(cells, os.path.join(cfg.plots_dir, "open_vs_closed_loop.png"))
@@ -535,6 +577,7 @@ should be read with that caveat.
 
 - `plots/ttft_vs_arrival_rate.png`
 - `plots/prefix_caching_effect.png`
+- `plots/effect_size_comparison.png`
 - `plots/ttft_distribution_per_arm.png`
 - `plots/itl_abort_windows.png`
 - `plots/open_vs_closed_loop.png`
@@ -542,7 +585,7 @@ should be read with that caveat.
     with open(cfg.out, "w") as f:
         f.write(md)
     print(f"wrote {cfg.out}")
-    print(f"wrote 5 plots to {cfg.plots_dir}/")
+    print(f"wrote 6 plots to {cfg.plots_dir}/")
 
 
 if __name__ == "__main__":
