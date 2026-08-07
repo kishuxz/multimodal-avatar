@@ -1,0 +1,65 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-07T08:13:42.335619+00:00",
+    "git_sha": "021357a8e106e00e4f07f2ff914da0989d15ef4a",
+    "git_dirty": false,
+    "git_sha_source": "env (shipped from transfer machine)",
+    "gpu": {
+      "name": "NVIDIA H100 80GB HBM3",
+      "driver_version": "580.126.09",
+      "driver_max_cuda_version": "13.0"
+    },
+    "vllm_version": "0.26.0",
+    "vllm_docker_image": null,
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--base-url",
+      "http://localhost:8000/v1",
+      "--model",
+      "Qwen/Qwen2.5-1.5B-Instruct",
+      "--label",
+      "fp8",
+      "--duration",
+      "30",
+      "--target-concurrency",
+      "1",
+      "8",
+      "32",
+      "--out",
+      "results/calibration_fp8.json"
+    ],
+    "extra": {
+      "script": "calibrate.py",
+      "arm_label": "fp8"
+    }
+  },
+  "config": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "label": "fp8",
+    "duration": 30.0,
+    "warmup": 3,
+    "seed": 0,
+    "target_concurrency": [
+      1.0,
+      8.0,
+      32.0
+    ],
+    "out": "results/calibration_fp8.json"
+  },
+  "measurement": {
+    "method": "closed-loop, concurrency=1, barge-in=0.0 -- no queueing at that concurrency, so E2E is service time directly, not service time plus wait",
+    "probe_result_ref": "results/calibration_fp8_probe.json",
+    "mean_service_time_s": 0.06205358537080506,
+    "service_time_p50_s": 0.05393536761403084,
+    "service_time_p95_s": 0.10764778964221478,
+    "n_samples": 481
+  },
+  "derived_rates_req_per_s": {
+    "1.0": 16.1151,
+    "8.0": 128.9208,
+    "32.0": 515.6833
+  }
+}
