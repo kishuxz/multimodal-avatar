@@ -98,6 +98,15 @@ push with a clean message succeeded), and separately by attempting a
 push with a correct message but the wrong author/committer identity
 (also rejected).
 
+**Correction:** the identity check originally required committer ==
+kishuxz unconditionally. That's wrong -- GitHub itself is always the
+committer on a squash-merge (`noreply@github.com`), which is normal
+merge mechanics, not an attribution problem. First push after PR #16
+merged onto `main` was rejected by my own hook for exactly this reason.
+Fixed to require author == kishuxz always, and committer == kishuxz OR
+GitHub's own bot email. Re-verified both directions: the real merge
+history now passes, a genuinely bad author/committer is still rejected.
+
 ## Barge-in timing (`harness.py`, issue #4)
 
 **Chose:** run the SSE read as its own `asyncio.Task` and race it against
