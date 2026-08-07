@@ -433,3 +433,93 @@ individually rather than paying the cost everywhere.
 runs closed-loop at concurrency=1, which is inherently low-volume
 (~500 requests in 30s) regardless of the eventual load rate, so it was
 never the cost driver this check was about.
+
+## Corrected results: noise band first, then the actual finding
+
+The first write-up of these numbers (PR #18, before this entry) made
+two mistakes worth recording alongside the fix, not just silently
+correcting: it called FP8 "slower than fp16 at both ends" when the
+data already showed it faster at low load and slower at high, and it
+called a 2.4% single-run gap between AWQ and fp16 a "crossover"
+without ever checking whether that gap was bigger than one arm's own
+run-to-run noise. Both are now fixed, from real repeat data --
+5 runs per arm, concurrency ~= 1 and ~= 32, prefix caching off,
+identical config, seeds 0-4 (`scripts/repeat_check.py`,
+`results/repeat_*.json`).
+
+**TTFT p50 / p99, mean +/- stdev across 5 repeats:**
+
+| | concurrency ~= 1 (p50) | concurrency ~= 1 (p99) | concurrency ~= 32 (p50) | concurrency ~= 32 (p99) |
+|---|---|---|---|---|
+| fp16 | 8.39 +/- 0.05 ms | 14.00 +/- 1.77 ms | 37.31 +/- 2.43 ms | 88.58 +/- 7.31 ms |
+| AWQ | 10.47 +/- 0.37 ms | 16.85 +/- 1.23 ms | 37.79 +/- 0.76 ms | 91.35 +/- 9.21 ms |
+| FP8 (weight-only) | 8.23 +/- 0.11 ms | 13.82 +/- 2.48 ms | 42.43 +/- 2.05 ms | 102.30 +/- 3.58 ms |
+
+**AWQ vs fp16:** at concurrency ~= 1, AWQ is 2.08ms slower than fp16,
+against a combined noise scale of a few tenths of a millisecond --
+five-plus standard deviations, clearly real, matches the prediction
+(dequant overhead, never bandwidth-bound at this batch size). At
+concurrency ~= 32, AWQ's mean (37.79ms) is actually *higher* than
+fp16's (37.31ms) -- the opposite direction from the single-run
+"crossover" claim -- but the 0.48ms gap is well inside fp16's own
++/-2.43ms run-to-run noise. **Corrected finding: no measurable
+difference between fp16 and AWQ at concurrency 32. At low load fp16
+is clearly ahead.** There is no crossover in this data. A single run
+each made it look like one; five did not.
+
+**FP8 (weight-only) vs fp16 -- a real, opposite-direction pattern,
+not the same story as AWQ:** at concurrency ~= 1, FP8 is marginally
+faster (8.23 vs 8.39ms) -- small, on the edge of FP8's own noise
+(+/-0.11ms), directionally consistent across all 5 repeats but not a
+large effect. At concurrency ~= 32, FP8 is clearly slower (42.43 vs
+37.31ms, ~14% higher) -- a ~5ms gap against a combined noise scale of
+2-2.5ms on each side, a real difference, not noise.
+**Candidate mechanism, stated as a hypothesis, not confirmed by
+profiling:** weight-only FP8 halves the bytes moved per forward pass
+(fp8 vs bf16 weights). At concurrency ~= 1, decode is memory-bandwidth
+bound and weights are read from HBM once per forward pass regardless
+of batch size -- smaller weights are a direct, nearly-free latency
+win when there's little compute happening anyway. At concurrency ~=
+32, the batch is large enough that the workload shifts compute-bound;
+weight-loading cost is now amortized across many more tokens per
+read, shrinking the bandwidth benefit, while the fp8-to-bf16 dequant
+step needed before each matmul (activations stay bf16 -- see the FP8
+flag entry above) is a fixed compute tax that does *not* shrink with
+batch size, and now lands on top of an already-saturated GPU. Net:
+a real slowdown once compute, not memory, is the bottleneck.
+**Why AWQ doesn't show the same divergence** is a real open question,
+not resolved here: one plausible reason is that vLLM's AWQ (int4)
+kernels are far more mature/optimized than the generic
+`fp8_per_tensor` weight-only path (AWQ is a widely-deployed, heavily
+optimized method; this specific FP8 shorthand is a newer, simpler
+recipe) -- if the FP8 dequant kernel is less fused/efficient, its
+fixed overhead could scale worse with batch size than AWQ's. This is
+a hypothesis, not a measured claim; confirming it would need a kernel-
+level profile (e.g. Nsight), which is out of scope here.
+
+**What this sweep's largest, most robust effect actually is --
+restructuring the story around it:** prefix caching, not
+quantization. fp16 with prefix caching on vs off at concurrency ~= 32
+(single runs, not yet repeat-validated the way the quantization
+comparison above is): TTFT p50 26.95ms vs 37.36ms (28% lower with
+caching on), p99 55.06ms vs 99.65ms (45% lower). Both gaps are many
+times larger than any quantization effect measured here, including
+the real ones (FP8's ~14% slowdown at high load). On a multi-turn
+conversational workload built from a small number of repeated
+prefixes, prefix caching is the first-order lever; quantization is
+second-order at this model size and these load levels. The README
+leads with this, not with quantization.
+**Not yet repeat-validated:** the prefix-caching effect size above is
+from the original single-run sweep, same limitation the AWQ crossover
+claim had before this correction. It's such a large gap (28/45%)
+relative to any noise band observed so far (a few percent) that it's
+very unlikely to be noise, but it hasn't been checked the same way
+the quantization comparison now has. Worth a repeat pass before
+leaning on the exact percentages in a final write-up, even though the
+direction and rough magnitude are not in doubt.
+
+**Scope of every claim above:** Qwen2.5-1.5B-Instruct, single H100
+80GB, concurrency approximately 1 and approximately 32 (not the full
+0-32 range), prefix caching off unless stated otherwise, vLLM 0.26.0.
+None of this generalizes to other model sizes, other hardware, or
+load levels between or beyond the two tested here without saying so.

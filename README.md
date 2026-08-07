@@ -3,9 +3,13 @@
 Measuring the latency of a real-time conversational AI avatar, and the
 cost of the tricks used to make it fast.
 
-Status: scaffold only. No benchmarks have been run yet — see
+Status: Phase 1 (LLM serving sweep) has produced results; the tables
+below are still TODO pending Phase 5's write-up pass. See
 `docs/decisions.md` for why every number in this README will come from a
-committed script, never a placeholder.
+committed script, never a placeholder, and for the full corrected
+findings in the meantime (the noise-band-validated quantization
+comparison, and why prefix caching, not quantization, is this sweep's
+largest effect).
 
 ## The question
 
