@@ -76,9 +76,10 @@ BARGEIN_ORDER = [0.0, 0.25]
 def pct(xs, p):
     # Mirrors harness.py's own pct() (linear-interpolated nearest-rank) --
     # duplicated rather than imported, since harness.py requires aiohttp
-    # (pod-only; see requirements-pod.txt) purely to reach this six-line
-    # function, which would drag a live-server dependency into a script
-    # that is supposed to run with no server and no GPU.
+    # (pod-only; see requirements-pod-h100.txt / requirements-pod-h200.txt)
+    # purely to reach this six-line function, which would drag a
+    # live-server dependency into a script that is supposed to run with
+    # no server and no GPU.
     if not xs:
         return None
     xs = sorted(xs)
