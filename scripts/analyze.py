@@ -257,6 +257,8 @@ def build_cells(results_dir):
     repeat_stats = discover_repeat_summaries(results_dir)
 
     cells = {}
+    covered_repeat_keys = set()
+
     for run in runs:
         repeat_key = (run["arm"], run["concurrency_target"])
         is_repeat_covered = (
@@ -265,11 +267,33 @@ def build_cells(results_dir):
         )
         if is_repeat_covered:
             cell = repeat_cell(run, seed_groups[repeat_key], repeat_stats[repeat_key])
+            covered_repeat_keys.add(repeat_key)
         else:
             cell = single_run_cell(run)
         key = (run["arm"], run["prefix_caching"], run["mode"],
                run["concurrency_target"], run["barge_in"])
         cells[key] = cell
+
+    # Repeat-covered cells with no matching single-run file to "upgrade":
+    # sweep.sh v2 calls repeat_check.py INSTEAD OF a single harness.py run
+    # for these cells (see run_open_loop_matrix), not alongside a
+    # redundant one -- the H100 sweep always had both (repeats were a
+    # separate manual pass after the fact), so this case never came up
+    # until v2 made repeats the only measurement for these cells. Build
+    # the cell directly from the seed group rather than assuming a `run`
+    # entry already exists to attach it to.
+    for repeat_key, seed_paths in seed_groups.items():
+        if repeat_key in covered_repeat_keys:
+            continue
+        arm, conc = repeat_key
+        synth_run = {
+            "path": seed_paths[0], "file": os.path.basename(seed_paths[0]),
+            "arm": arm, "prefix_caching": False, "mode": "open",
+            "concurrency_target": conc, "barge_in": 0.0,
+        }
+        cells[(arm, False, "open", conc, 0.0)] = repeat_cell(
+            synth_run, seed_paths, repeat_stats[repeat_key])
+
     return cells
 
 
@@ -548,6 +572,8 @@ def plot_effect_size_comparison(cells, out_path):
     # either alone; a reader has to cross-reference the table. This plot
     # exists only to make that one comparison legible from a single image.
     baseline = cells.get(("fp16", False, "open", 32, 0.0))
+    if baseline is None:
+        return  # nothing to compare against -- e.g. fp16 wasn't in this sweep
     levers = [
         ("prefix caching\n(fp16 on vs off)", cells.get(("fp16", True, "open", 32, 0.0))),
         ("AWQ\n(vs fp16)", cells.get(("awq", False, "open", 32, 0.0))),
@@ -582,15 +608,20 @@ def plot_effect_size_comparison(cells, out_path):
 
 
 def plot_open_vs_closed(cells, out_path):
-    arms = ["fp16", "awq", "fp8"]
+    # Arms with no data (e.g. FP8 excluded from a sweep -- issue #29) are
+    # skipped entirely, not plotted as a 0-height bar: a missing arm
+    # rendered as ~0ms is indistinguishable from "measured and fast,"
+    # which is a worse failure than an empty chart.
+    arms = [arm for arm in ["fp16", "awq", "fp8"]
+            if cells.get((arm, False, "open", 8, 0.0)) and cells.get((arm, False, "closed", 8, 0.0))]
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
     for ax, (label, key) in zip(axes, [("TTFT p50 (ms)", "ttft_p50_ms"), ("TTFT p99 (ms)", "ttft_p99_ms")]):
         open_vals, closed_vals = [], []
         for arm in arms:
             o = cells.get((arm, False, "open", 8, 0.0))
             c = cells.get((arm, False, "closed", 8, 0.0))
-            open_vals.append(o[key][0] if o else 0)
-            closed_vals.append(c[key][0] if c else 0)
+            open_vals.append(o[key][0])
+            closed_vals.append(c[key][0])
         x = range(len(arms))
         width = 0.35
         ax.bar([i - width / 2 for i in x], open_vals, width, label="open-loop (honest)")
