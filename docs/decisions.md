@@ -132,3 +132,32 @@ back with `ttft: null`, `abort_before_first_token: true`, and
 nothing vanished from the summary. A second run with the abort window
 moved past the first token, and a third with no abort at all, reproduced
 the original TTFT/ITL/token-count behavior unchanged.
+
+## Squash-merge authorship (what actually determines it)
+
+**Found:** GitHub's squash-merge sets the resulting commit's author to
+whoever opened the pull request, not whoever performs the merge and not
+the branch commits' own author. Confirmed by ruling out the alternatives
+directly, not by inference: same wrong author (`kishore-crux`, real work
+email) came out of a browser-driven merge and a `gh pr merge --squash`
+API call made while authenticated as `kishuxz` -- so "who clicks merge"
+isn't it. Then a squash of a branch whose sole commit was independently
+verified as `kishuxz` on both author and committer *still* produced
+`kishore-crux` as the primary author, with `kishuxz` demoted to a
+`Co-authored-by` trailer -- so "branch commit authorship" isn't it
+either. Both PRs had been opened while `kishore-crux` was the active
+account, before this repo's ownership and my authentication moved to
+`kishuxz`; that's the one variable that lined up with both bad results.
+**Why it matters:** the pre-push hook (identity + message checks) only
+runs on local pushes. It cannot see or block a GitHub-side squash-merge,
+so it gave no protection against this at all -- two more bad commits
+landed on `main` after the hook already existed.
+**What we do about it:** nothing new to build. Every PR from here on is
+opened while authenticated as `kishuxz` (that's now the only account
+signed in), which removes the one variable that caused this. If a PR
+ever gets opened under the wrong account again, the fix is the same
+rewrite-plus-force-push-with-lease used three times already in this
+repo's short history -- verify the resulting merge commit's raw
+`commit.author`/`commit.committer` immediately after every merge
+(`gh api repos/.../commits --jq '.[0].commit'`), not the GitHub-resolved
+`.author.login`, since that field is what actually lands in git history.
