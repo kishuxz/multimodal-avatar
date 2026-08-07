@@ -573,3 +573,41 @@ either right now.
 (`scripts/sweep.sh` currently `tee`s it to the pod's local disk and
 stops there) into a file committed alongside its `results/*.json`, so
 this check has something to diff against and stops being one-sided.
+
+## Abort-window count spread by arm: exposure, not a different mechanism (Phase 5)
+
+**Found:** `plots/itl_abort_windows.png` (concurrency ~= 32, barge-in
+0.25) shows very different abort counts and window counts by arm: fp16
+8 aborts / 8 windows, AWQ 33 aborts / 31 windows, FP8 19 aborts / 16
+windows -- roughly a 4x spread between fp16 and AWQ. First instinct was
+that this might mean barge-in itself behaves differently per arm, or a
+data problem. It's neither.
+**Why:** the sampled abort delay is a fixed `--barge-in-min`/`--barge-in-max`
+(0.3-1.2s, uniform) applied identically to every arm -- it only actually
+aborts anything if the delay elapses *before* the request would have
+finished on its own. So the abort rate is really measuring "fraction of
+requests still in flight past ~0.3s," which depends entirely on each
+arm's own request duration at this load point. Checked directly against
+the `bargein0.25` files themselves: fraction of (non-warmup, non-error)
+requests with e2e > 300ms is 7.7% for fp16, 18.2% for AWQ, 13.2% for
+FP8 -- the same ordering and roughly the same spread as the abort
+counts (0.10% / 0.45% / 0.24%). AWQ being the slowest-tailed arm here
+lines up exactly with AWQ having the highest ITL p50 among the three at
+concurrency ~= 32 (8.57-8.80ms vs fp16's 5.05-5.33ms and FP8's
+6.01-6.06ms -- see "Corrected results" above), which is the same AWQ-
+decode-degradation-at-high-concurrency finding already recorded there,
+now showing up a second way.
+**Why it matters:** the with-abort-vs-without-abort *comparison within
+each arm* (the actual plot) is unaffected by this -- it's still a valid
+same-arm, same-run comparison. What it rules out is reading the window-
+*count* itself as a cross-arm finding ("AWQ gets barge-in tested 4x as
+often" is not a statement about barge-in; it's a restatement of AWQ
+already being the slowest arm at this load point). The plot's caption
+and `abort_window_itls()`'s docstring both say this now, so the number
+isn't misread standalone.
+**How to apply:** if barge-in exposure ever needs to be held constant
+across arms for a real cross-arm comparison (not just within-arm, which
+is what's reported here), the fix is deriving `--barge-in-min`/`--max`
+per arm from that arm's own service-time distribution, the same way
+`scripts/calibrate.py` already derives arrival rate per arm via Little's
+Law -- not attempted here, out of scope for this pass.

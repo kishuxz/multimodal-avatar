@@ -65,6 +65,7 @@ should be read with that caveat.
 
 - `plots/ttft_vs_arrival_rate.png`
 - `plots/prefix_caching_effect.png`
+- `plots/effect_size_comparison.png`
 - `plots/ttft_distribution_per_arm.png`
 - `plots/itl_abort_windows.png`
 - `plots/open_vs_closed_loop.png`

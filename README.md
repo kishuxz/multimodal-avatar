@@ -69,7 +69,17 @@ fp16 with prefix caching on vs off at concurrency ~= 32: TTFT p50 28%
 lower, p99 38% lower with caching on -- both several times larger than
 any quantization effect measured here. Single-run, not yet
 repeat-validated; the direction and rough magnitude aren't in doubt, the
-exact percentages might move a few points on a repeat pass.
+exact percentages might move a few points on a repeat pass. The plot
+above makes the on/off comparison directly, but not the "larger than
+quantization" half of the claim -- that comparison needs both effects in
+the same frame:
+
+![Effect size comparison](plots/effect_size_comparison.png)
+
+-27.8%/-37.8% (prefix caching) against +1.3%/+3.1% (AWQ) and
++13.7%/+15.5% (FP8, weight-only) at the same load point -- prefix
+caching's effect is roughly double FP8's and an order of magnitude past
+AWQ's, in the direction that helps.
 
 **Quantization, repeat-validated (5 seeds, concurrency ~= 1 and ~= 32,
 prefix caching off):**
@@ -117,6 +127,15 @@ delay (0.3-1.2s), so no abort ever fires there. At c~=32, ITL for
 requests sharing a 200ms window with an abort runs measurably higher
 than requests in windows without one, across all three arms -- barge-in
 has a real cost to bystanders, not just to the interrupted request.
+
+The three arms' abort counts differ a lot (fp16 8, AWQ 33, FP8 19) --
+that's exposure, not barge-in behaving differently: the same fixed
+0.3-1.2s abort delay only fires on a request still in flight, and how
+often that happens tracks each arm's own decode speed at this load
+point (AWQ is the slowest of the three here, same finding as the
+quantization table above, showing up a second way). The within-arm
+with/without comparison the plot makes is unaffected; see
+`docs/decisions.md` for the full check.
 
 ## What these numbers do not prove
 
