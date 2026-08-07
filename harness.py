@@ -205,6 +205,15 @@ async def run_turn(
                     read_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError, aiohttp.ClientError):
                         await read_task
+                    # Explicit, not implicit: don't rely on __aexit__'s
+                    # release() to notice the read never finished and
+                    # decide to close the connection. Close it ourselves,
+                    # right when the abort fires, so the server sees the
+                    # disconnect as early as this client can produce it.
+                    # (Whether the server actually cancels generation on
+                    # that disconnect is issue #1's question, not this
+                    # one -- this only guarantees the signal is sent.)
+                    resp.close()
                 else:
                     await read_task
 

@@ -98,6 +98,15 @@ push with a clean message succeeded), and separately by attempting a
 push with a correct message but the wrong author/committer identity
 (also rejected).
 
+**Correction:** the identity check originally required committer ==
+kishuxz unconditionally. That's wrong -- GitHub itself is always the
+committer on a squash-merge (`noreply@github.com`), which is normal
+merge mechanics, not an attribution problem. First push after PR #16
+merged onto `main` was rejected by my own hook for exactly this reason.
+Fixed to require author == kishuxz always, and committer == kishuxz OR
+GitHub's own bot email. Re-verified both directions: the real merge
+history now passes, a genuinely bad author/committer is still rejected.
+
 ## Barge-in timing (`harness.py`, issue #4)
 
 **Chose:** run the SSE read as its own `asyncio.Task` and race it against
@@ -214,3 +223,46 @@ finding and isn't.
 reporting `13.0` -- likely a partial/mismatched CUDA runtime install
 alongside torch's bundled one. Filed here rather than chased down now
 since it isn't blocking fp16 verification.
+
+## Abort propagation, confirmed (issue #1)
+
+**Prediction, stated before measuring:** vLLM's OpenAI-compatible server
+is generally understood to detect a client disconnect during streaming
+and cancel the underlying generation. Cancellation was expected to
+work; the uncertain quantity was abort -> slot-free latency.
+
+**Chose:** an explicit `resp.close()` in `harness.py`'s abort path,
+replacing the implicit release-on-`async with`-exit used before.
+**Why:** issue #1 was opened specifically because "did it actually
+abort, or did the server just keep computing into a dropped socket"
+was unverified. Closing explicitly removes any dependency on aiohttp's
+default behavior for a partially-read response being what we assumed.
+
+**Found:** the prediction held. `scripts/verify_abort.py` sends one
+`max_tokens=512` request, aborts after only 10 tokens (max_tokens is
+high enough, and the abort early enough, that a fast slot-free can't be
+confused with coincidental natural completion -- at this model's decode
+speed, 512 tokens takes over a second; the script estimates that
+remaining time from the pre-abort inter-token latency and flags it if
+the measured latency comes anywhere close), and polls `GET /metrics`
+for `vllm:num_requests_running` throughout. Five trials, four at the
+tightest achievable polling interval: `vllm:num_requests_running`
+dropped from 1 to 0 within **2.2-4.1ms of the abort being issued**,
+against an estimated 1.0-1.5s of remaining generation if it hadn't been
+cancelled -- not ambiguous.
+
+**Caveat, stated plainly:** the measured latency and the achieved
+polling resolution are close to each other (observed median poll
+interval ~3.1ms at `--poll-interval 0`; measured latencies 3.7-4.1ms
+in that setting). That means the true cancellation latency is
+somewhere between "the previous poll, which hadn't seen it yet" and
+"this poll, which did" -- i.e., genuinely fast (low single-digit
+milliseconds), but this measurement cannot resolve a more precise
+number than that without a fundamentally different approach (e.g.
+instrumenting the server directly rather than polling it externally).
+Reporting "fast, single-digit ms, resolution-limited" rather than a
+falsely precise point estimate.
+**How to apply:** any future arm/config that changes abort behavior
+(e.g. a different `max_tokens`, a different quantization backend) gets
+re-verified with this script rather than assumed to inherit this
+result -- it measures the mechanism, not a universal constant.
