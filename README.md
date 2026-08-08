@@ -107,15 +107,78 @@ this environment, which expected no meaningful high-load difference
 (dequant overhead reasoned as a fixed compute cost, unaffected by more
 VRAM) -- the same shape the H100 run actually showed. H200 instead shows
 a clear ~21.6% AWQ advantage at high concurrency, repeat-validated on
-both sides. **Candidate mechanism, not confirmed by profiling:** if
-concurrency ≈32 is memory-bandwidth-bound rather than compute-bound,
-AWQ's int4 weights move ~4x less data per forward pass than fp16's
-bf16 weights -- a real bandwidth win if bandwidth is the bottleneck at
-that batch size. An untested alternative: H200's `awq_marlin`/
-`MacheteLinearKernel` kernel path may simply be better-optimized than
-whatever ran on H100, independent of any bandwidth argument. Neither has
-been checked with a profiler -- the result's direction and magnitude
-aren't in question, the mechanism is open.
+both sides.
+
+**The result stands; only the explanation moved.** This section
+originally proposed a bandwidth-bound mechanism -- int4 weights move
+"~4x less data" per forward pass, a real win if concurrency ≈32 is
+memory-bandwidth-bound. Both halves of that claim turned out wrong.
+The byte ratio itself was wrong: `Qwen2.5-1.5B-Instruct`'s safetensors
+total 3.09GB (bf16); the AWQ checkpoint's total 1.61GB -- **1.91x, not
+4x.** Bit-width alone (16 bits / 4 bits) doesn't give the on-disk byte
+ratio, because AWQ's packed int4 weights carry real fp16 scale and
+zero-point values alongside them (one pair per quantization group,
+typically 128 weights) -- those bytes partially offset the packing win.
+And profiling (`docs/decisions.md`, "Phase 8") contradicts the
+bandwidth mechanism outright, not merely leaves it unconfirmed: a
+bandwidth-relief story predicts AWQ's GEMM kernels take a *smaller*
+share of decode-window time than fp16's; instead AWQ's GEMM share is
+**71.8%** against fp16's **58.9%** -- higher, not lower. Machete's int4
+kernels appear individually slower per call than the bf16 path they
+replace (int4 unpacking and per-group dequant run inside the kernel, on
+top of the matmul), so AWQ spends *more* wall-clock time in GEMM
+kernels despite each one moving fewer bytes from HBM.
+
+Three explanations were profiled against each other, stated with their
+current standing rather than a single preferred story:
+
+1. **Bandwidth -- contradicted at the decode level.** The GEMM-share
+   result above is the opposite of what "moves less data, so
+   proportionally faster" predicts. This doesn't rule out a bandwidth
+   effect existing somewhere else in the request lifecycle (prefill
+   wasn't isolated -- see below), only that it isn't visible in
+   decode-window kernel time, which is where a per-token
+   weight-streaming saving would have to show up.
+2. **Kernel efficiency -- plausible, not confirmable with this
+   tooling.** Machete's int4 GEMMs taking a larger share of
+   decode-window time despite moving less data is consistent with a
+   genuinely different (not just smaller-input) efficiency profile, but
+   distinguishing "compute-bound int4 unpacking overhead" from
+   "different achieved bytes/s" needs hardware performance counters
+   (`ncu`/Nsight Compute) -- blocked on this pod (a hypervisor-level
+   restriction, not fixable from inside the container; see
+   `docs/decisions.md`).
+3. **Scheduling -- the best-supported observable symptom, with no
+   traced cause.** AWQ's realized concurrency at c≈32 runs **~16%
+   lower** than fp16's at the same nominal target rate (63.92 ± 1.12
+   vs. 76.47 ± 6.67 in-flight requests) -- AWQ queues less under
+   identical offered load. Consistent with freed KV-cache headroom
+   changing admission behavior, but equally consistent with AWQ simply
+   completing requests faster for any reason at all; lower realized
+   concurrency is what faster service time mechanically produces under
+   either of the other two hypotheses too, so this doesn't distinguish
+   itself as a root cause, only as a real symptom.
+
+**What a follow-up needs, and why it wasn't run here:** this profiling
+pass captured prefill and decode kernels mixed together in one window
+(`record_shapes` wasn't enabled), so a prefill-specific GEMM cost can't
+be separated from steady-state decode in the trace. Prefill-phase-
+specific profiling -- `record_shapes=True`, or bucketing captured
+kernels by request-admission events -- is the next experiment this
+points at, not a repeat of this one.
+
+**Profiler-induced disruption, disclosed here and not just in
+`docs/decisions.md`:** capturing the trace itself came at a real cost.
+The profiling window disrupted request-level scheduling badly enough
+that neither pass's own TTFT/ITL/error numbers are usable as evidence
+for anything (fp16 TTFT p99 rose to 12.6-91.9s depending on pass,
+against a 14s nominal run, with 27-33% of requests erroring
+client-side) -- only the trace's internal kernel-category timings are
+used above, on the reasoning that CUDA kernel execution time reflects
+the GPU work queued, largely independent of how delayed the
+surrounding request scheduling was. Two passes, differently disrupted,
+agreed closely on kernel-category share (57.8%/74.0% vs. 58.9%/71.8%),
+which is why those numbers are trusted despite this.
 
 **What the speed costs, and the most decision-relevant sentence in this
 section: at c≈1, AWQ is worse on both axes it will ever be judged on --
@@ -324,6 +387,23 @@ surprise, and what would falsify it. AWQ's H200 high-load advantage
 (finding 2, above) is the clearest example of a prediction the data
 contradicted outright, written up as a contradiction rather than
 smoothed into a retrofit explanation.
+
+**A wrong mechanism can get written down even when the data to catch
+it is already committed.** AWQ's c≈32 TTFT advantage was first
+explained as a decode-phase bandwidth effect -- despite the 5-seed
+repeat data already on file showing ITL (steady-state decode) barely
+differs between arms: fp16 6.142 ± 0.876ms vs. AWQ 5.844ms, a
+0.298ms/4.85% gap smaller than fp16's own run-to-run noise, while the
+clean, repeat-validated 21.6% effect sits entirely in TTFT. A
+decode-phase weight-streaming saving would have to show up in ITL; it
+doesn't. That split was sitting in already-committed
+`results/h200/repeat_{fp16,awq}_c32_seed*.json` files before any
+profiler ran. The kernel-level profiling in finding 2 confirmed what
+those numbers already implied (AWQ's GEMM share of decode time turned
+out *higher*, not lower) -- it didn't discover something new, it caught
+a mechanism claim the existing data already argued against. Read the
+noise bands on repeat-validated numbers before reaching for a
+mechanism, not only before reporting the headline effect.
 
 **Perplexity: forced-decoding, and why the noise band has to come from
 different text, not repeats.** Perplexity is measured against the
@@ -767,12 +847,23 @@ make diffusion-quality  # LPIPS between a DeepCache frame and its non-cached bas
   representational error -- it does not establish how that error would
   be perceived in an actual avatar conversation, which could show a
   smaller or larger effect.
-- **AWQ's high-concurrency advantage has an open mechanism.** The
-  bandwidth-bound hypothesis (Findings, #2) is a candidate explanation,
-  not a profiled one -- no kernel-level profiling (e.g. Nsight) has been
-  run to confirm it over the alternative (H200's AWQ kernel path simply
-  being better-optimized). The result itself is repeat-validated; the
-  *why* is not established.
+- **AWQ's high-concurrency advantage is now profiled, and the
+  mechanism is still open -- a different open question than before.**
+  Kernel-level profiling (Findings, #2; `docs/decisions.md`, "Phase 8")
+  contradicts, rather than merely leaves unconfirmed, the bandwidth-
+  bound mechanism this repo originally proposed: AWQ's GEMM kernels
+  take a *larger* share of decode-window time (71.8%) than fp16's
+  (58.9%), the opposite of what a bandwidth-relief story predicts.
+  What's still open is which of two remaining explanations accounts
+  for the effect -- Machete's int4 kernels being less compute-efficient
+  per call (plausible, needs `ncu` hardware counters this pod's
+  hypervisor blocks) or a scheduling/admission effect showing up as
+  AWQ's ~16% lower realized concurrency at the same nominal load (a
+  real symptom, not yet traced to a cause) -- and this profiling pass
+  can't isolate one from the other, nor separate prefill-phase cost
+  from steady-state decode (`record_shapes` wasn't enabled). The result
+  itself is unaffected by any of this: 21.6% faster, repeat-validated
+  on both arms.
 - **Concurrency tested at three points (≈1/8/32), not a continuous
   curve.** Behavior between or beyond these points is not measured.
 - **The prefix-caching-on number is single-run on both environments** --
