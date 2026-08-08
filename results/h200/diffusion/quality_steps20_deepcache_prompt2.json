@@ -1,6 +1,6 @@
 {
   "provenance": {
-    "timestamp_utc": "2026-08-08T00:19:28.164109+00:00",
+    "timestamp_utc": "2026-08-08T00:20:17.362684+00:00",
     "git_sha": "8cc5ce367bb719704ab9e06446c206f221716802",
     "git_dirty": true,
     "git_sha_source": "env (shipped from transfer machine)",
@@ -20,20 +20,20 @@
       "--repeats",
       "1",
       "--seed-start",
-      "2",
+      "0",
       "--deep-cache",
       "--cache-interval",
       "5",
       "--cache-branch",
       "0",
       "--prompt",
-      "a head-and-shoulders portrait of a person, upper body, centered in frame, looking directly at camera, neutral expression, photorealistic, studio lighting",
+      "a professional studio headshot of a person, shoulders and upper chest visible, direct eye contact, calm neutral expression, soft even lighting, photorealistic",
       "--negative-prompt",
       "blurry, low quality, distorted, close-up, extreme close-up, macro, cropped, out of frame, cut off, zoomed in",
       "--out",
-      "results/h200/diffusion/quality_steps20_deepcache.json",
+      "results/h200/diffusion/quality_steps20_deepcache_prompt2.json",
       "--save-image",
-      "results/h200/diffusion/quality_steps20_deepcache.png"
+      "results/h200/diffusion/quality_steps20_deepcache_prompt2.png"
     ],
     "extra": {
       "script": "diffusion_bench.py",
@@ -54,64 +54,64 @@
     "height": 512,
     "width": 512,
     "repeats": 1,
-    "seed_start": 2,
-    "prompt": "a head-and-shoulders portrait of a person, upper body, centered in frame, looking directly at camera, neutral expression, photorealistic, studio lighting",
+    "seed_start": 0,
+    "prompt": "a professional studio headshot of a person, shoulders and upper chest visible, direct eye contact, calm neutral expression, soft even lighting, photorealistic",
     "negative_prompt": "blurry, low quality, distorted, close-up, extreme close-up, macro, cropped, out of frame, cut off, zoomed in",
     "deep_cache": true,
     "cache_interval": 5,
     "cache_branch": 0,
-    "save_image": "results/h200/diffusion/quality_steps20_deepcache.png",
-    "out": "results/h200/diffusion/quality_steps20_deepcache.json"
+    "save_image": "results/h200/diffusion/quality_steps20_deepcache_prompt2.png",
+    "out": "results/h200/diffusion/quality_steps20_deepcache_prompt2.json"
   },
   "stats": {
     "cond_s": {
-      "mean": 0.0066753774881362915,
+      "mean": 0.006667636334896088,
       "stdev": null
     },
     "step_mean_s": {
-      "mean": 0.005491847917437553,
+      "mean": 0.005497195012867451,
       "stdev": null
     },
     "vae_s": {
-      "mean": 0.021027743816375732,
+      "mean": 0.020979128777980804,
       "stdev": null
     },
     "total_s": {
-      "mean": 0.1375400796532631,
+      "mean": 0.1375906653702259,
       "stdev": null,
-      "min": 0.1375400796532631,
-      "max": 0.1375400796532631
+      "min": 0.1375906653702259,
+      "max": 0.1375906653702259
     }
   },
   "per_repeat": [
     {
-      "seed": 2,
-      "cond_s": 0.0066753774881362915,
+      "seed": 0,
+      "cond_s": 0.006667636334896088,
       "step_s": [
-        0.018641818314790726,
-        0.0020644627511501312,
-        0.0020727626979351044,
-        0.0020953193306922913,
-        0.0021366700530052185,
-        0.018401190638542175,
-        0.0022606216371059418,
-        0.002174749970436096,
-        0.0022041313350200653,
-        0.002198476344347,
-        0.01865311712026596,
-        0.0022715479135513306,
-        0.0022654756903648376,
-        0.002265382558107376,
-        0.0023021362721920013,
-        0.018504776060581207,
-        0.002337764948606491,
-        0.0023445188999176025,
-        0.002354554831981659,
-        0.002287480980157852
+        0.01876213774085045,
+        0.0020759999752044678,
+        0.002077575773000717,
+        0.0021248385310173035,
+        0.0021372251212596893,
+        0.01849457621574402,
+        0.002179790288209915,
+        0.0021586529910564423,
+        0.0021678321063518524,
+        0.0021934397518634796,
+        0.018643271178007126,
+        0.002226985991001129,
+        0.002238217741250992,
+        0.0022636130452156067,
+        0.002269245684146881,
+        0.018628951162099838,
+        0.0023199617862701416,
+        0.0023251138627529144,
+        0.0023481249809265137,
+        0.0023083463311195374
       ],
-      "step_mean_s": 0.005491847917437553,
-      "vae_s": 0.021027743816375732,
-      "total_s": 0.1375400796532631
+      "step_mean_s": 0.005497195012867451,
+      "vae_s": 0.020979128777980804,
+      "total_s": 0.1375906653702259
     }
   ]
 }

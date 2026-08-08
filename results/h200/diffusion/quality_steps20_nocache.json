@@ -1,9 +1,9 @@
 {
   "provenance": {
-    "timestamp_utc": "2026-08-07T22:13:17.028156+00:00",
-    "git_sha": null,
-    "git_dirty": null,
-    "git_sha_source": null,
+    "timestamp_utc": "2026-08-08T00:19:18.077153+00:00",
+    "git_sha": "8cc5ce367bb719704ab9e06446c206f221716802",
+    "git_dirty": true,
+    "git_sha_source": "env (shipped from transfer machine)",
     "gpu": {
       "name": "NVIDIA H200",
       "driver_version": "570.124.06",
@@ -20,7 +20,11 @@
       "--repeats",
       "1",
       "--seed-start",
-      "0",
+      "2",
+      "--prompt",
+      "a head-and-shoulders portrait of a person, upper body, centered in frame, looking directly at camera, neutral expression, photorealistic, studio lighting",
+      "--negative-prompt",
+      "blurry, low quality, distorted, close-up, extreme close-up, macro, cropped, out of frame, cut off, zoomed in",
       "--out",
       "results/h200/diffusion/quality_steps20_nocache.json",
       "--save-image",
@@ -45,7 +49,9 @@
     "height": 512,
     "width": 512,
     "repeats": 1,
-    "seed_start": 0,
+    "seed_start": 2,
+    "prompt": "a head-and-shoulders portrait of a person, upper body, centered in frame, looking directly at camera, neutral expression, photorealistic, studio lighting",
+    "negative_prompt": "blurry, low quality, distorted, close-up, extreme close-up, macro, cropped, out of frame, cut off, zoomed in",
     "deep_cache": false,
     "cache_interval": 5,
     "cache_branch": 0,
@@ -54,53 +60,53 @@
   },
   "stats": {
     "cond_s": {
-      "mean": 0.00703192874789238,
+      "mean": 0.006843902170658112,
       "stdev": null
     },
     "step_mean_s": {
-      "mean": 0.0189043078571558,
+      "mean": 0.017718958482146264,
       "stdev": null
     },
     "vae_s": {
-      "mean": 0.021055664867162704,
+      "mean": 0.020933032035827637,
       "stdev": null
     },
     "total_s": {
-      "mean": 0.4061737507581711,
+      "mean": 0.382156103849411,
       "stdev": null,
-      "min": 0.4061737507581711,
-      "max": 0.4061737507581711
+      "min": 0.382156103849411,
+      "max": 0.382156103849411
     }
   },
   "per_repeat": [
     {
-      "seed": 0,
-      "cond_s": 0.00703192874789238,
+      "seed": 2,
+      "cond_s": 0.006843902170658112,
       "step_s": [
-        0.019419625401496887,
-        0.01887253299355507,
-        0.01878584921360016,
-        0.018841926008462906,
-        0.018837235867977142,
-        0.018738485872745514,
-        0.018872100859880447,
-        0.018871046602725983,
-        0.018914535641670227,
-        0.018806204199790955,
-        0.01882823184132576,
-        0.018990475684404373,
-        0.01897616684436798,
-        0.019022300839424133,
-        0.01886316016316414,
-        0.018808498978614807,
-        0.018962625414133072,
-        0.018964167684316635,
-        0.018904585391283035,
-        0.018806401640176773
+        0.018175311386585236,
+        0.01762150600552559,
+        0.01774652674794197,
+        0.0177774615585804,
+        0.017699822783470154,
+        0.0176369771361351,
+        0.01778433844447136,
+        0.017581555992364883,
+        0.01764199510216713,
+        0.017740845680236816,
+        0.017763324081897736,
+        0.017746377736330032,
+        0.017725758254528046,
+        0.01757630705833435,
+        0.0176912322640419,
+        0.017704203724861145,
+        0.017669852823019028,
+        0.01760149747133255,
+        0.01778722181916237,
+        0.01770705357193947
       ],
-      "step_mean_s": 0.0189043078571558,
-      "vae_s": 0.021055664867162704,
-      "total_s": 0.4061737507581711
+      "step_mean_s": 0.017718958482146264,
+      "vae_s": 0.020933032035827637,
+      "total_s": 0.382156103849411
     }
   ]
 }

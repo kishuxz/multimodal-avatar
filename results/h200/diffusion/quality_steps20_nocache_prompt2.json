@@ -1,0 +1,112 @@
+{
+  "provenance": {
+    "timestamp_utc": "2026-08-08T00:20:07.261833+00:00",
+    "git_sha": "8cc5ce367bb719704ab9e06446c206f221716802",
+    "git_dirty": true,
+    "git_sha_source": "env (shipped from transfer machine)",
+    "gpu": {
+      "name": "NVIDIA H200",
+      "driver_version": "570.124.06",
+      "driver_max_cuda_version": "12.8"
+    },
+    "vllm_version": "0.19.1",
+    "vllm_docker_image": null,
+    "model": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+    "model_revision": null,
+    "python_version": "3.12.3",
+    "cli_args": [
+      "--steps",
+      "20",
+      "--repeats",
+      "1",
+      "--seed-start",
+      "0",
+      "--prompt",
+      "a professional studio headshot of a person, shoulders and upper chest visible, direct eye contact, calm neutral expression, soft even lighting, photorealistic",
+      "--negative-prompt",
+      "blurry, low quality, distorted, close-up, extreme close-up, macro, cropped, out of frame, cut off, zoomed in",
+      "--out",
+      "results/h200/diffusion/quality_steps20_nocache_prompt2.json",
+      "--save-image",
+      "results/h200/diffusion/quality_steps20_nocache_prompt2.png"
+    ],
+    "extra": {
+      "script": "diffusion_bench.py",
+      "scheduler": "DPMSolverMultistepScheduler",
+      "steps": 20,
+      "height": 512,
+      "width": 512,
+      "guidance_scale": 7.5,
+      "dtype": "float16",
+      "deep_cache": false,
+      "cache_interval": null,
+      "cache_branch": null,
+      "warmup_runs": 1
+    }
+  },
+  "config": {
+    "steps": 20,
+    "height": 512,
+    "width": 512,
+    "repeats": 1,
+    "seed_start": 0,
+    "prompt": "a professional studio headshot of a person, shoulders and upper chest visible, direct eye contact, calm neutral expression, soft even lighting, photorealistic",
+    "negative_prompt": "blurry, low quality, distorted, close-up, extreme close-up, macro, cropped, out of frame, cut off, zoomed in",
+    "deep_cache": false,
+    "cache_interval": 5,
+    "cache_branch": 0,
+    "save_image": "results/h200/diffusion/quality_steps20_nocache_prompt2.png",
+    "out": "results/h200/diffusion/quality_steps20_nocache_prompt2.json"
+  },
+  "stats": {
+    "cond_s": {
+      "mean": 0.006592258810997009,
+      "stdev": null
+    },
+    "step_mean_s": {
+      "mean": 0.01789752785116434,
+      "stdev": null
+    },
+    "vae_s": {
+      "mean": 0.020962350070476532,
+      "stdev": null
+    },
+    "total_s": {
+      "mean": 0.38550516590476036,
+      "stdev": null,
+      "min": 0.38550516590476036,
+      "max": 0.38550516590476036
+    }
+  },
+  "per_repeat": [
+    {
+      "seed": 0,
+      "cond_s": 0.006592258810997009,
+      "step_s": [
+        0.01829567551612854,
+        0.01803167164325714,
+        0.017887912690639496,
+        0.017907902598381042,
+        0.017945636063814163,
+        0.017825931310653687,
+        0.01797018200159073,
+        0.017851177603006363,
+        0.017808519303798676,
+        0.01779826357960701,
+        0.017841286957263947,
+        0.018020696938037872,
+        0.017944447696208954,
+        0.01780751347541809,
+        0.017870556563138962,
+        0.017867334187030792,
+        0.017742116004228592,
+        0.017843052744865417,
+        0.017823804169893265,
+        0.01786687597632408
+      ],
+      "step_mean_s": 0.01789752785116434,
+      "vae_s": 0.020962350070476532,
+      "total_s": 0.38550516590476036
+    }
+  ]
+}

@@ -50,8 +50,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bench import provenance
 
 MODEL_ID = "stable-diffusion-v1-5/stable-diffusion-v1-5"
-PROMPT = "a portrait of a person speaking, photorealistic, studio lighting"
-NEGATIVE_PROMPT = "blurry, low quality, distorted"
+DEFAULT_PROMPT = "a portrait of a person speaking, photorealistic, studio lighting"
+DEFAULT_NEGATIVE_PROMPT = "blurry, low quality, distorted"
 GUIDANCE_SCALE = 7.5
 
 
@@ -65,7 +65,7 @@ def load_pipe(device):
     return pipe
 
 
-def run_once(pipe, device, num_steps, height, width, seed):
+def run_once(pipe, device, num_steps, height, width, seed, prompt, negative_prompt):
     """One full frame generation, every stage synchronized and timed
     separately. Returns (cond_time_s, [step_time_s, ...], vae_time_s, image)."""
     generator = torch.Generator(device=device).manual_seed(seed)
@@ -74,12 +74,12 @@ def run_once(pipe, device, num_steps, height, width, seed):
     t0 = time.perf_counter()
     with torch.no_grad():
         text_inputs = pipe.tokenizer(
-            PROMPT, padding="max_length", max_length=pipe.tokenizer.model_max_length,
+            prompt, padding="max_length", max_length=pipe.tokenizer.model_max_length,
             truncation=True, return_tensors="pt",
         ).to(device)
         text_embeds = pipe.text_encoder(text_inputs.input_ids)[0]
         uncond_inputs = pipe.tokenizer(
-            NEGATIVE_PROMPT, padding="max_length", max_length=pipe.tokenizer.model_max_length,
+            negative_prompt, padding="max_length", max_length=pipe.tokenizer.model_max_length,
             truncation=True, return_tensors="pt",
         ).to(device)
         uncond_embeds = pipe.text_encoder(uncond_inputs.input_ids)[0]
@@ -135,6 +135,8 @@ def parse_args():
     p.add_argument("--width", type=int, default=512)
     p.add_argument("--repeats", type=int, default=5)
     p.add_argument("--seed-start", type=int, default=0)
+    p.add_argument("--prompt", default=DEFAULT_PROMPT)
+    p.add_argument("--negative-prompt", default=DEFAULT_NEGATIVE_PROMPT)
     p.add_argument("--deep-cache", action="store_true")
     p.add_argument("--cache-interval", type=int, default=5)
     p.add_argument("--cache-branch", type=int, default=0)
@@ -159,13 +161,16 @@ def main():
     # Warmup: one full generation, fully discarded. Not timed, not
     # recorded -- see module docstring / docs/decisions.md for why an
     # unwarmed first call isn't a real number.
-    run_once(pipe, device, cfg.steps, cfg.height, cfg.width, seed=999999)
+    run_once(pipe, device, cfg.steps, cfg.height, cfg.width, seed=999999,
+             prompt=cfg.prompt, negative_prompt=cfg.negative_prompt)
 
     per_repeat = []
     last_image = None
     for i in range(cfg.repeats):
         seed = cfg.seed_start + i
-        t_cond, step_times, t_vae, image = run_once(pipe, device, cfg.steps, cfg.height, cfg.width, seed)
+        t_cond, step_times, t_vae, image = run_once(
+            pipe, device, cfg.steps, cfg.height, cfg.width, seed,
+            cfg.prompt, cfg.negative_prompt)
         total = t_cond + sum(step_times) + t_vae
         last_image = image
         per_repeat.append({

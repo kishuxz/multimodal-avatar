@@ -1,0 +1,6 @@
+{
+  "reference": "results/h200/diffusion/quality_steps20_nocache_prompt2.png",
+  "candidate": "results/h200/diffusion/quality_steps20_deepcache_prompt2.png",
+  "net": "alex",
+  "lpips_distance": 0.5573071837425232
+}
