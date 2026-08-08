@@ -1681,79 +1681,127 @@ finding *more* true (VAE decode grows, conditioning stays roughly
 fixed), not less -- but that's not measured here, and the numbers above
 should not be read as resolution-independent.
 
-## Phase 6: LPIPS ranked the more-degraded image as closer to baseline
+## Phase 6: DeepCache's steps=4 erasure reproduces; LPIPS's read on it doesn't
 
-The single most useful methodological result in this repo, not because
-the metric is unusual (LPIPS is the standard choice -- the same family
-DeepCache's and TeaCache's own papers use for exactly this comparison)
-but because trusting it alone here would have produced the wrong
-conclusion, silently.
+This entry originally reported a single-prompt result: LPIPS ranked
+DeepCache's steps=4 frame as closer to its no-cache baseline than the
+steps=20 frame -- backwards from what the images showed. It read as
+the most useful methodological result in the repo. It was retested
+against a second, independently chosen prompt before being trusted
+that way. **It did not hold.** What follows is the corrected version:
+what reproduced, what didn't, and why the failure to reproduce is
+worth more than the original single-prompt finding was.
 
-`scripts/diffusion_quality_check.py` computed LPIPS distance between a
-DeepCache-enabled frame and the same seed/steps generated with the
-cache disabled, at two step counts (`results/h200/diffusion/
-quality_steps4_lpips.json`, `quality_steps20_lpips.json`):
+**What the original images actually were, and why they got replaced
+first:** the original `quality_steps{4,20}_{nocache,deepcache}.png`
+pair used `diffusion_bench.py`'s hardcoded default prompt and
+`--seed-start 0` -- an unintentional extreme close-up (a mouth, an
+ear, a distorted face), not a deliberately chosen composition. Before
+re-running the LPIPS comparison at all, `diffusion_bench.py` was given
+`--prompt`/`--negative-prompt` overrides (previously module-level
+constants), and a prompt/seed was checked against the no-cache
+baseline at *both* step counts before running the full comparison --
+so framing wasn't something to fix twice. `"a head-and-shoulders
+portrait of a person, upper body, centered in frame, looking directly
+at camera, neutral expression, photorealistic, studio lighting"`,
+seed 2 ("prompt A" below), gave a sensible head-and-shoulders
+composition at both steps=4 and steps=20 and became the replacement
+for the canonical images. A second, differently-worded prompt --
+`"a professional studio headshot of a person, shoulders and upper
+chest visible, direct eye contact, calm neutral expression, soft even
+lighting, photorealistic"`, seed 0 ("prompt B") -- worked on the first
+seed tried and was used purely to test whether the LPIPS finding
+generalized. Both prompts' full comparisons are committed
+(`results/h200/diffusion/quality_steps{4,20}_{nocache,deepcache}.json`
+/ `..._prompt2.json`, and the matching `.png` / `_lpips.json` files);
+neither set was cherry-picked for its LPIPS result -- framing was
+checked and locked in *before* any LPIPS number existed for either
+prompt.
 
-| Steps | LPIPS distance |
-|---|---|
-| 4 | 0.4801 |
-| 20 | 0.6776 |
+**What reproduced: the steps=4 erasure, on both prompts.** An already
+low-detail non-cached frame collapses into a near-featureless blur once
+DeepCache is enabled, at the step count nearest the 40ms real-time
+budget, regardless of which prompt produced it. This is the durable
+finding -- it answers this project's actual question (does caching
+preserve the output at the step count a real system would use) and it
+survived being checked twice, not just asserted once.
 
-Read only as numbers, this says steps=4's cached output is *closer* to
-its non-cached baseline than steps=20's is -- caching costs less
-quality at the step count nearest the real budget than at the "quality"
-step count. **That reading is backwards.** The images, pulled and
-looked at before writing anything down (`results/h200/diffusion/
-quality_steps{4,20}_{nocache,deepcache}.png`):
+**What did not reproduce: "DeepCache changes the composition" at
+steps=20, as a general claim.** On prompt A, DeepCache's steps=20 frame
+keeps the *same* pose and composition as its baseline but visibly loses
+color and clothing detail -- a real degradation, not a different
+picture. On prompt B, DeepCache's steps=20 frame *is* a genuinely
+different render -- different hair, different gaze, a different shirt
+pattern -- matching the original single-prompt description. Both are
+real; neither generalizes to the other. "Composition-changing at
+steps=20" is prompt-dependent, not a property of steps=20 itself, and
+the original entry's confident, general phrasing of it was wrong to be
+confident about on a sample of one.
 
-![steps=4, no cache](../results/h200/diffusion/quality_steps4_nocache.png)
-![steps=4, DeepCache](../results/h200/diffusion/quality_steps4_deepcache.png)
-![steps=20, no cache](../results/h200/diffusion/quality_steps20_nocache.png)
-![steps=20, DeepCache](../results/h200/diffusion/quality_steps20_deepcache.png)
+**LPIPS, checked against both prompts (`scripts/diffusion_quality_check.py`,
+`results/h200/diffusion/quality_steps{4,20}_lpips.json` /
+`quality_steps{4,20}_lpips_prompt2.json`):**
 
-At steps=20, DeepCache changes the *composition* -- the non-cached
-frame is a sharp, full-face portrait; the cached frame at the same
-seed is a sharp close-up of an entirely different facial region. Both
-images are individually coherent and detailed; they just aren't the
-same picture. At steps=4, the non-cached frame is already low-detail
-(4 steps from pure noise is close to the lower edge of what this
-scheduler can render *at all*), and the cached frame at steps=4 has
-lost nearly all remaining structure -- a soft, largely-featureless
-blur. The steps=4 pair looks *more* alike only in the sense that two
-blurry things resemble each other more than two sharp, different
-things do.
+| Prompt | steps=4 | steps=20 | Read |
+|---|---|---|---|
+| A | 0.4821 | 0.5682 | **Inverted.** Ranks the near-blank steps=4 frame as *more* similar to baseline than the visibly-preserved-but-degraded steps=20 frame -- the same direction as the original single-prompt result (0.4801/0.6776), effectively unchanged once the images were regenerated. |
+| B | 0.5627 | 0.5573 | **No signal.** 0.0054 apart. Not a correct ranking -- two values this close are indistinguishable, not "steps=4 correctly scored worse." The two frames fail in visibly different ways (near-total erasure at steps=4, a changed identity/composition at steps=20); LPIPS assigns them almost the same number either way. |
 
-**Mechanism:** LPIPS (like most learned perceptual metrics) scores
-distance in a deep feature space tuned to detect texture- and
-edge-level differences. Two low-detail images produce weak activations
-in comparable regions of that feature space almost regardless of their
+**Both runs are deterministic, confirming this repo's own
+already-established finding about forced/seeded generation (see the
+perplexity single-slice-repeat entry, above): re-running either
+prompt's full pipeline reproduced its LPIPS number bit-for-bit, so
+these are not noisy point estimates that might read differently on a
+third run of the *same* prompt/seed -- the variation that matters here
+is across prompts, not across repeats of one.**
+
+**Neither result supports trusting LPIPS alone, and they don't fail the
+same way.** On prompt A it inverted -- a confident, wrong ranking. On
+prompt B it didn't invert, but it didn't rank correctly either: a
+0.0054 gap is not a signal a reader could act on. Read charitably for
+LPIPS, prompt B is "no worse than useless" rather than "actively
+misleading" -- but "no worse than useless" is still not a metric this
+project can report standalone. Two runs, two different ways of not
+being trustworthy, zero runs that were.
+
+**Mechanism (holds for the prompt-A inversion, unchanged from the
+original entry):** LPIPS scores distance in a deep feature space tuned
+to texture- and edge-level differences. Two low-detail images (the
+steps=4 pair) produce weak, similar activations almost regardless of
 content, because there isn't much texture or edge structure in either
-one to disagree about -- the metric reads "both are soft" as "these are
-similar." Two sharp, structurally different images produce strong,
-different activations, which the metric correctly reads as "these are
-different" -- even though, for this project's purposes (does caching
-preserve the intended output at a given step count), the steps=20 pair
-is arguably the *less* concerning case: it's a wrong picture, not a
-degraded one, at a step count nobody would actually ship at 25fps
-anyway. The steps=4 pair is the one that matters, and LPIPS ranked it
-as the *better*-preserved result.
+to disagree about -- the metric reads "both are soft" as "these are
+similar." This doesn't explain prompt B's flat result as cleanly:
+prompt B's steps=4 pair is a similarly severe erasure, but its steps=20
+pair is a *sharp, structurally different* image pair (an identity
+change, not a degradation) -- the "two sharp, different images produce
+strong activations" mechanism from the original entry would predict a
+*large* steps=20 distance for prompt B, not one nearly tied with
+steps=4's. That prediction didn't hold either. **The mechanism
+explains the inversion; it does not explain why prompt B came out flat
+instead of correctly ordered, and that gap is left open rather than
+papered over with a retrofit.**
 
-**Stated plainly, because this is the point of writing the entry at
-all: read as a standalone number, LPIPS would have supported exactly
-the wrong conclusion here -- that DeepCache's quality cost is smaller
-in the low-step regime the real-time budget actually forces, when the
-opposite is true. The only reason this didn't ship as a finding is that
-the images were pulled and looked at before the number was trusted.**
-A metric was checked against ground truth (the actual pixels) rather
-than reported on its own authority -- the same discipline this repo has
-applied to every other number that turned out to need it (FP8's
-sample text alongside its `finish_reason` counts; the actual decoded
-tokens behind AWQ's perplexity delta).
+**Why this matters more than the original finding did:** a repo where
+a striking single-observation result survives scrutiny is fine. A repo
+where it doesn't, and says so, is rarer and more useful to a reader
+deciding whether to trust anything else in it. This is the third time
+in this project that a compelling single-observation result changed
+under repetition -- alongside the single-run "AWQ crossover" (H200
+sweep results, above) and the single-run prefix-caching reversal at
+c≈1 (Corrected results, above). Three different measurement types
+(latency percentiles, a reversal's direction, a learned perceptual
+metric), the same lesson: a single striking observation and a
+repeat-validated one are different kinds of evidence, and this project
+has now been wrong in that specific way three times.
+
 **How to apply:** any future quality-cost claim in this repo that
-relies on a learned perceptual metric gets a visual spot-check before
-being trusted standalone, every time, not just when the number looks
-surprising -- this is exactly the kind of failure that looks
-unsurprising until someone looks.
+relies on a learned perceptual metric gets checked against more than
+one input before being trusted standalone -- a visual spot-check on a
+single prompt is necessary but, this entry now shows, not sufficient;
+the metric's *behavior itself* needs a second data point before its
+failure mode (or absence of one) is reported as general. "Checked
+once and looked plausible" and "checked twice and held" are different
+claims, and this repo states which one it's making, every time.
 
 ## Phase 6: DeepCache, honestly scoped
 

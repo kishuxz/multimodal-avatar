@@ -385,6 +385,20 @@ prefix-caching reversal at c≈1 that repeat runs made disappear (see
 "single-run" is one of these repeat-validated cells; single-run numbers
 are stated as such, not implied to carry the same weight.
 
+**A compelling single-observation result changing under repetition is
+now a pattern in this project, not a one-off.** The AWQ crossover and
+the c≈1 prefix-caching reversal, above, are the first two instances --
+both striking, single-run effects that a second look (five repeat
+seeds) dissolved into noise. The diffusion section's LPIPS inversion
+(below) is the third: a strong, single-prompt result -- LPIPS ranking
+the more-degraded steps=4 frame as closer to baseline -- that did not
+hold when checked against a second prompt. Three different measurement
+types (latency percentiles, a reversal's direction, a learned
+perceptual metric), the same underlying lesson each time: a single
+striking observation and a repeat-validated one are different kinds of
+evidence, and this project has now been wrong in the same specific way
+three times when it treated the first as if it were the second.
+
 **Predict-before-measure.** Every quantization arm and every hardware
 change has a prediction recorded in `docs/decisions.md` *before* the
 run that tested it -- what was expected, what magnitude would be a
@@ -613,49 +627,62 @@ through comparably-sized networks. Held, more strongly than
 predicted** -- VAE decode (~21.0ms) is slightly *larger* than one step
 (~18-19ms), and at 1 step it's 45% of total frame time on its own.
 
-### LPIPS ranked the more-degraded image as closer to baseline
+### DeepCache's steps=4 erasure reproduces; LPIPS's read on it doesn't
 
-LPIPS (Learned Perceptual Image Patch Similarity) is a neural-network-
-based distance metric between two images -- lower means more similar,
-per the network's learned notion of perceptual similarity, not raw
-pixel difference. The most useful methodological result in this repo,
-not because the metric is unusual (LPIPS is the standard choice for
-this exact comparison -- the same family DeepCache's and TeaCache's own
-papers use) but because trusting it alone here would have shipped the
-wrong conclusion.
-
-| Steps | LPIPS distance (DeepCache vs. no-cache, same seed) |
-|---|---|
-| 4 | 0.4801 |
-| 20 | 0.6776 |
-
-Read as numbers alone: caching costs *less* quality at steps=4 (nearest
-the real budget) than at steps=20. **That's backwards.**
+**The durable finding first: DeepCache's quality cost at steps=4 -- the
+step count nearest the 40ms real-time budget -- is severe, and it
+reproduces.** Tested against two independently chosen prompts, an
+already low-detail non-cached frame collapses into a near-featureless
+blur once caching is enabled, in both cases:
 
 | | no cache | DeepCache |
 |---|---|---|
-| steps=4 | ![steps=4, no cache](results/h200/diffusion/quality_steps4_nocache.png) | ![steps=4, DeepCache](results/h200/diffusion/quality_steps4_deepcache.png) |
-| steps=20 | ![steps=20, no cache](results/h200/diffusion/quality_steps20_nocache.png) | ![steps=20, DeepCache](results/h200/diffusion/quality_steps20_deepcache.png) |
+| steps=4 (prompt A) | ![steps=4, no cache](results/h200/diffusion/quality_steps4_nocache.png) | ![steps=4, DeepCache](results/h200/diffusion/quality_steps4_deepcache.png) |
+| steps=20 (prompt A) | ![steps=20, no cache](results/h200/diffusion/quality_steps20_nocache.png) | ![steps=20, DeepCache](results/h200/diffusion/quality_steps20_deepcache.png) |
 
-At steps=20, DeepCache changes the *composition* -- both frames are
-sharp and detailed, but they're different pictures (a full-face
-portrait vs. a close-up of a different facial region), same seed. At
-steps=4, DeepCache doesn't change the composition so much as erase it
--- an already low-detail non-cached frame becomes a near-featureless
-blur. **The steps=4 pair looks more "similar" to LPIPS only because two
-blurry images resemble each other more than two sharp, different ones
-do** -- the metric reads texture/edge agreement, and there's little
-texture in either steps=4 frame to disagree about. For this project's
-actual question (does caching preserve the output at the step count
-that matters), steps=4 is the worse failure, and LPIPS ranked it
-better.
+This is the finding that answers this project's actual question --
+does caching preserve the output at the step count a real system would
+use -- and it's the part of this section that held up under a second
+prompt, not just the first one tried. It comes first because it's the
+one that matters and the one that's confirmed twice.
 
-**Stated plainly: read on its own, LPIPS would have supported exactly
-the wrong conclusion -- that DeepCache's quality cost shrinks in the
-low-step regime the real-time budget forces, when the opposite is
-true. The only reason this didn't ship as a finding is that the images
-were pulled and looked at before the number was trusted.** Full
-mechanism discussion: `docs/decisions.md`.
+**At steps=20 the picture is less consistent, and that inconsistency
+is itself part of what this section reports.** On prompt A (above),
+DeepCache keeps the *same* pose and composition as its baseline but
+visibly loses color and clothing detail -- a real degradation, not a
+different picture. On prompt B (below, same comparison, different
+prompt/seed), DeepCache produces a genuinely different-looking render
+-- different hair, different gaze, a different shirt pattern:
+
+| | no cache | DeepCache |
+|---|---|---|
+| steps=4 (prompt B) | ![steps=4, no cache, prompt B](results/h200/diffusion/quality_steps4_nocache_prompt2.png) | ![steps=4, DeepCache, prompt B](results/h200/diffusion/quality_steps4_deepcache_prompt2.png) |
+| steps=20 (prompt B) | ![steps=20, no cache, prompt B](results/h200/diffusion/quality_steps20_nocache_prompt2.png) | ![steps=20, DeepCache, prompt B](results/h200/diffusion/quality_steps20_deepcache_prompt2.png) |
+
+The original, single-prompt version of this finding described steps=20
+as "DeepCache changes the composition." That claim doesn't generalize
+-- it held for prompt B, not for prompt A. **Prompt-dependent, not a
+property of steps=20 itself.**
+
+**LPIPS (Learned Perceptual Image Patch Similarity, a neural-network-
+based distance metric -- lower means more similar) was checked against
+both prompts, and gave a different wrong answer each time:**
+
+| Prompt | steps=4 | steps=20 | Read |
+|---|---|---|---|
+| A (portrait, images above) | 0.4821 | 0.5682 | **Inverted.** Ranks the near-blank steps=4 frame as *more* similar to baseline than the visibly-preserved-but-degraded steps=20 frame -- backwards from what the images show. |
+| B (headshot, images above) | 0.5627 | 0.5573 | **No signal.** 0.0054 apart -- indistinguishable -- despite the two frames failing in visibly different ways (near-total erasure at steps=4, a changed identity/composition at steps=20). |
+
+**Neither run supports trusting LPIPS alone here, and they don't fail
+the same way.** On prompt A it inverted -- a confident, wrong ranking.
+On prompt B it didn't invert, but it didn't rank correctly either: two
+values 0.0054 apart aren't a ranking a reader could act on, they're
+noise around a metric with nothing useful to say about which frame is
+worse. That's arguably the same failure as the inversion in different
+clothing -- not a metric that's usually right and occasionally
+backwards, but one whose relationship to visible quality isn't reliable
+enough to read on its own, whichever way it happens to fail. Full
+mechanism discussion and both prompts' full data: `docs/decisions.md`.
 
 ### DeepCache, honestly scoped
 
@@ -900,15 +927,21 @@ make diffusion-quality  # LPIPS between a DeepCache frame and its non-cached bas
   DeepCache is the only optimization tried, at one fixed hyperparameter
   setting (`cache_interval=5`, not tuned per step count) -- TeaCache and
   other caching methods, and other DeepCache settings, are untested.
-- **Diffusion quality cost: LPIPS plus eyeballing two image pairs, not
-  a validated perceptual study.** The LPIPS-vs-visual-inspection
-  mismatch (Diffusion section, above) is the reason a single learned
-  metric isn't trusted alone anywhere in this repo -- but the visual
-  check itself is one person looking at two pairs of images, not a
-  human-rated study with any statistical power. "DeepCache's quality
-  cost is severe at steps=4 and steps=20" is a real, visually-confirmed
-  finding; "exactly how severe, in a way that generalizes" is not
-  established by two image pairs.
+- **Diffusion quality cost: LPIPS plus eyeballing two image pairs per
+  prompt, not a validated perceptual study.** The LPIPS-vs-visual-
+  inspection mismatch (Diffusion section, above) is the reason a single
+  learned metric isn't trusted alone anywhere in this repo -- but the
+  visual check itself is one person looking at a handful of images, not
+  a human-rated study with any statistical power. "DeepCache erases
+  detail at steps=4" is a real, visually-confirmed finding, reproduced
+  across two prompts; "exactly how severe, in a way that generalizes
+  further" is not established by two prompts' worth of image pairs.
+  **The metric's own behavior was tested on two prompts, not just
+  applied once** -- it inverted on the first and gave no usable signal
+  on the second (Diffusion section, above); those are two different
+  failure modes, not one result and one confirmation, and both are
+  single-prompt-pair observations in their own right, not a swept
+  characterization of when LPIPS can be trusted for this comparison.
 - **Quality cost checked at only 2 of the 8 step counts in the speedup
   table** (steps=4 and steps=20) -- a distinct scope limit from "one
   fixed hyperparameter setting," above. The speedup curve is
