@@ -60,6 +60,10 @@ CALIBRATION_RE = re.compile(r"^calibration_[A-Za-z0-9_]+\.json$")
 # by this script -- see scripts/perplexity.py / perplexity_multislice.py
 # and the README's Findings section for those numbers.
 PERPLEXITY_RE = re.compile(r"^perplexity_[A-Za-z0-9_]+\.json$")
+# scripts/verify_abort.py's own trial dumps: confirms abort-to-slot-free
+# latency, not a load-sweep cell -- see docs/decisions.md, "Re-verified
+# on H200."
+VERIFY_ABORT_RE = re.compile(r"^verify_abort_trial\d+\.json$")
 
 # filename arm token -> (canonical arm, prefix caching on/off). AWQ and FP8
 # only ever run with prefix caching off (docs/decisions.md: "prefix caching
@@ -187,6 +191,10 @@ INTENTIONALLY_UNCLASSIFIED_PATTERNS = [
                      "(forced-decoding on a wikitext slice, not a load-sweep "
                      "cell), read directly, not built into this script's "
                      "tables or plots"),
+    (VERIFY_ABORT_RE, "scripts/verify_abort.py's own abort-to-slot-free "
+                       "latency trial, not a load-sweep cell -- cited "
+                       "directly in docs/decisions.md, not built into this "
+                       "script's tables or plots"),
 ]
 
 
@@ -448,6 +456,31 @@ def plot_ttft_vs_arrival_rate(cells, out_path, env_label):
     plt.close(fig)
 
 
+def _validated_concs(cells, arm, prefix_caching, mode="open", barge_in=0.0):
+    """Concurrencies where this (arm, prefix_caching) cell is
+    repeat-validated (cell["runs"] > 1, from repeat_cell() -- 5 seeds),
+    read directly off the cells dict rather than hardcoded, so a plot
+    subtitle naming a validation status can't silently drift out of sync
+    with which concurrencies actually got repeat runs."""
+    return [c for c in CONC_ORDER
+            if (cells.get((arm, prefix_caching, mode, c, barge_in)) or {}).get("runs", 0) > 1]
+
+
+def _prefix_validation_note(cells):
+    off_repeat = _validated_concs(cells, "fp16", False)
+    on_repeat = _validated_concs(cells, "fp16", True)
+
+    def fmt(arm_label, repeat_concs):
+        if not repeat_concs:
+            return f"{arm_label} single-run at every concurrency shown"
+        if len(repeat_concs) == len(CONC_ORDER):
+            return f"{arm_label} repeat-validated at every concurrency shown"
+        concs = "/".join(f"c≈{c}" for c in repeat_concs)
+        return f"{arm_label} repeat-validated at {concs}, single-run elsewhere"
+
+    return f"{fmt('off-arm', off_repeat)}; {fmt('on-arm', on_repeat)}"
+
+
 def plot_prefix_caching_effect(cells, out_path, env_label):
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
     for ax, (label, key) in zip(axes, [("TTFT p50 (ms)", "ttft_p50_ms"), ("TTFT p99 (ms)", "ttft_p99_ms")]):
@@ -472,7 +505,7 @@ def plot_prefix_caching_effect(cells, out_path, env_label):
         ax.legend()
         ax.grid(alpha=0.3, axis="y")
     fig.suptitle(f"Prefix caching on vs off, fp16 -- the largest lever in this sweep -- {env_label}\n"
-                  "(single runs, not yet repeat-validated -- see docs/decisions.md)")
+                  f"({_prefix_validation_note(cells)})")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -609,6 +642,23 @@ def plot_itl_abort_windows(results_dir, out_path, env_label):
     plt.close(fig)
 
 
+def _lever_validation_note(name, baseline, cell):
+    """Per-lever validation status read off cells[...]["runs"] for both
+    the fp16 baseline and the compared arm. A hardcoded "prefix caching
+    single-run" string here previously ignored that the fp16-off baseline
+    itself is repeat-validated at c≈32 -- only the fp16-on arm being
+    compared against it is single-run."""
+    baseline_repeat = baseline["runs"] > 1
+    cell_repeat = cell["runs"] > 1
+    if baseline_repeat and cell_repeat:
+        return f"{name} repeat-validated"
+    if not baseline_repeat and not cell_repeat:
+        return f"{name} single-run"
+    validated_side = "baseline" if baseline_repeat else "arm"
+    single_side = "arm" if baseline_repeat else "baseline"
+    return f"{name}: {validated_side} repeat-validated, {single_side} single-run"
+
+
 def plot_effect_size_comparison(cells, out_path, env_label):
     # The other plots each make one comparison in isolation (fp16 on vs
     # off; the arrival-rate curve). Neither puts prefix caching's effect
@@ -619,20 +669,19 @@ def plot_effect_size_comparison(cells, out_path, env_label):
     baseline = cells.get(("fp16", False, "open", 32, 0.0))
     if baseline is None:
         return  # nothing to compare against -- e.g. fp16 wasn't in this sweep
-    # (lever label, cell, validation status) -- status is reported per-lever
-    # in the subtitle below, built only from levers actually present in this
-    # sweep. A hardcoded "AWQ/FP8 repeat-validated" string previously stayed
-    # on the H200 version of this plot after FP8 was excluded (issue #29),
-    # naming a lever the chart no longer shows any data for.
+    # (lever label, cell, short name) -- short name feeds the validation
+    # status computed below, built only from levers actually present in
+    # this sweep. A hardcoded "AWQ/FP8 repeat-validated" string previously
+    # stayed on the H200 version of this plot after FP8 was excluded
+    # (issue #29), naming a lever the chart no longer shows any data for.
     levers = [
-        ("prefix caching\n(fp16 on vs off)", cells.get(("fp16", True, "open", 32, 0.0)),
-         "prefix caching single-run"),
-        ("AWQ\n(vs fp16)", cells.get(("awq", False, "open", 32, 0.0)), "AWQ repeat-validated"),
-        ("FP8\n(vs fp16)", cells.get(("fp8", False, "open", 32, 0.0)), "FP8 repeat-validated"),
+        ("prefix caching\n(fp16 on vs off)", cells.get(("fp16", True, "open", 32, 0.0)), "prefix caching"),
+        ("AWQ\n(vs fp16)", cells.get(("awq", False, "open", 32, 0.0)), "AWQ"),
+        ("FP8\n(vs fp16)", cells.get(("fp8", False, "open", 32, 0.0)), "FP8"),
     ]
     fig, ax = plt.subplots(figsize=(7, 5))
     labels = [l for l, c, s in levers if c]
-    status_notes = [s for l, c, s in levers if c]
+    status_notes = [_lever_validation_note(s, baseline, c) for l, c, s in levers if c]
     p50_deltas = [(c["ttft_p50_ms"][0] - baseline["ttft_p50_ms"][0]) / baseline["ttft_p50_ms"][0] * 100
                   for l, c, s in levers if c]
     p99_deltas = [(c["ttft_p99_ms"][0] - baseline["ttft_p99_ms"][0]) / baseline["ttft_p99_ms"][0] * 100
